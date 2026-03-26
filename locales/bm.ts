@@ -52,7 +52,7 @@ export default {
     dashboard: {
       greeting: {
         morning: 'Selamat Pagi',
-        afternoon: 'Selamat Tengahari',
+        afternoon: 'Selamat Tengah Hari',
         evening: 'Selamat Petang',
         night: 'Selamat Malam',
       },

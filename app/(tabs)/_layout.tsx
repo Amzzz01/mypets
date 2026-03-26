@@ -93,6 +93,11 @@ export default function TabsLayout() {
           ),
         }}
       />
+      {/* Hidden screens – accessible via router.push, not shown in tab bar */}
+      <Tabs.Screen name="edit-profile" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="expenses" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="vet-finder" options={{ href: null, tabBarStyle: { display: 'none' } }} />
+      <Tabs.Screen name="litter" options={{ href: null, tabBarStyle: { display: 'none' } }} />
     </Tabs>
   );
 }

@@ -30,7 +30,15 @@
     "plugins": [
       "expo-router",
       "expo-localization",
-      "expo-web-browser"
+      "expo-web-browser",
+      "@react-native-community/datetimepicker",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Aplikasi ini memerlukan akses lokasi untuk mencari klinik veterinar berhampiran.",
+          "locationWhenInUsePermission": "Aplikasi ini memerlukan akses lokasi untuk mencari klinik veterinar berhampiran."
+        }
+      ]
     ]
   }
 }

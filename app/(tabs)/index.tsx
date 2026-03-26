@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../lib/supabase';
@@ -97,8 +98,8 @@ const sk = StyleSheet.create({
 function getGreetingKey(): string {
   const h = new Date().getHours();
   if (h >= 5 && h < 12) return 'dashboard.greeting.morning';
-  if (h >= 12 && h < 15) return 'dashboard.greeting.afternoon';
-  if (h >= 15 && h < 19) return 'dashboard.greeting.evening';
+  if (h >= 12 && h < 18) return 'dashboard.greeting.afternoon';
+  if (h >= 18 && h < 21) return 'dashboard.greeting.evening';
   return 'dashboard.greeting.night';
 }
 
@@ -121,6 +122,59 @@ function PetChip({ name }: { name: string }) {
     </View>
   );
 }
+
+// ─── Quick Action Card ────────────────────────────────────────────────────────
+
+function QuickActionCard({
+  icon,
+  label,
+  accent,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  accent: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity style={[qa.card, { borderColor: accent + '40' }]} onPress={onPress} activeOpacity={0.8}>
+      <View style={[qa.iconBox, { backgroundColor: accent + '22' }]}>
+        <Ionicons name={icon} size={22} color={accent} />
+      </View>
+      <Text style={[qa.label, { color: accent }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const qa = StyleSheet.create({
+  card: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    marginRight: 12,
+    width: 88,
+    borderWidth: 1.5,
+    shadowColor: '#1A237E',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  iconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+});
 
 function AddPetChip({ label }: { label: string }) {
   return (
@@ -397,6 +451,35 @@ export default function DashboardScreen() {
                 <PetChip key={pet.id} name={pet.name} />
               ))}
               <AddPetChip label={t('dashboard.addPet')} />
+            </ScrollView>
+
+            {/* Quick Actions Section */}
+            <Text style={[styles.sectionTitle, { marginTop: 28 }]}>Tindakan Pantas</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.petsRow}
+            >
+              <QuickActionCard
+                icon="business-outline"
+                label="Cari Vet"
+                accent="#EF5350"
+                onPress={() => router.push('/vet-finder')}
+              />
+              <QuickActionCard
+                icon="cash-outline"
+                label="Perbelanjaan"
+                accent="#FFB300"
+                onPress={() => router.push('/expenses')}
+              />
+              {role === 'Breeder' && (
+                <QuickActionCard
+                  icon="heart-outline"
+                  label="Litter"
+                  accent="#AB47BC"
+                  onPress={() => router.push('/litter')}
+                />
+              )}
             </ScrollView>
 
             {/* Reminders Section */}
