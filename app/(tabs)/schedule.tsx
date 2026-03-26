@@ -146,9 +146,11 @@ function SkeletonCard() {
 interface ReminderCardProps {
   reminder: Reminder;
   onMarkDone: (id: string) => void;
+  onDelete: (id: string) => void;
+  onEdit: (reminder: Reminder) => void;
 }
 
-function ReminderCard({ reminder, onMarkDone }: ReminderCardProps) {
+function ReminderCard({ reminder, onMarkDone, onDelete, onEdit }: ReminderCardProps) {
   const today = toDateString(new Date());
 
   const typeConfig: Record<ReminderType, { color: string; icon: string }> = {
@@ -202,15 +204,31 @@ function ReminderCard({ reminder, onMarkDone }: ReminderCardProps) {
         <View style={[styles.reminderBadge, { backgroundColor: badgeBg }]}>
           <Text style={[styles.reminderBadgeText, { color: badgeText }]}>{badgeLabel}</Text>
         </View>
-        {!reminder.is_done && (
+        <View style={{ flexDirection: 'row', gap: 6, marginTop: 4 }}>
+          {!reminder.is_done && (
+            <TouchableOpacity
+              style={styles.checkBtn}
+              onPress={() => onMarkDone(reminder.id)}
+              activeOpacity={0.75}
+            >
+              <Ionicons name="checkmark" size={16} color="#fff" />
+            </TouchableOpacity>
+          )}
           <TouchableOpacity
-            style={styles.checkBtn}
-            onPress={() => onMarkDone(reminder.id)}
+            style={[styles.checkBtn, { backgroundColor: PRIMARY }]}
+            onPress={() => onEdit(reminder)}
             activeOpacity={0.75}
           >
-            <Ionicons name="checkmark" size={16} color="#fff" />
+            <Ionicons name="create-outline" size={14} color="#fff" />
           </TouchableOpacity>
-        )}
+          <TouchableOpacity
+            style={[styles.checkBtn, { backgroundColor: RED }]}
+            onPress={() => onDelete(reminder.id)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="trash-outline" size={14} color="#fff" />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -313,6 +331,7 @@ interface AddReminderModalProps {
   onSaved: () => void;
   userId: string;
   defaultDate: Date;
+  initialReminder?: Reminder | null;
 }
 
 function AddReminderModal({
@@ -321,6 +340,7 @@ function AddReminderModal({
   onSaved,
   userId,
   defaultDate,
+  initialReminder,
 }: AddReminderModalProps) {
   const [title, setTitle] = useState('');
   const [selectedPetId, setSelectedPetId] = useState<string | null>(null);
@@ -339,7 +359,19 @@ function AddReminderModal({
 
   useEffect(() => {
     if (visible) {
-      setDate(defaultDate);
+      if (initialReminder) {
+        setTitle(initialReminder.title);
+        setSelectedPetId(initialReminder.pet_id ?? null);
+        setSelectedPetName(initialReminder.pets?.name ?? null);
+        setRepeat(initialReminder.repeat);
+        setType(initialReminder.type);
+        const [h, m] = (initialReminder.time ?? '00:00').split(':').map(Number);
+        const t = new Date(); t.setHours(h, m, 0, 0); setTime(t);
+        setDate(initialReminder.date ? new Date(initialReminder.date) : defaultDate);
+      } else {
+        resetForm();
+        setDate(defaultDate);
+      }
       fetchPets();
     }
   }, [visible]);
@@ -377,17 +409,29 @@ function AddReminderModal({
       const timeStr = `${String(time.getHours()).padStart(2, '0')}:${String(
         time.getMinutes()
       ).padStart(2, '0')}`;
-      const { error } = await supabase.from('reminders').insert({
-        user_id: userId,
-        pet_id: selectedPetId,
-        title: title.trim(),
-        date: dateStr,
-        time: timeStr,
-        repeat,
-        type,
-        is_done: false,
-      });
-      if (error) throw error;
+      if (initialReminder) {
+        const { error } = await supabase.from('reminders').update({
+          pet_id: selectedPetId,
+          title: title.trim(),
+          date: dateStr,
+          time: timeStr,
+          repeat,
+          type,
+        }).eq('id', initialReminder.id);
+        if (error) throw error;
+      } else {
+        const { error } = await supabase.from('reminders').insert({
+          user_id: userId,
+          pet_id: selectedPetId,
+          title: title.trim(),
+          date: dateStr,
+          time: timeStr,
+          repeat,
+          type,
+          is_done: false,
+        });
+        if (error) throw error;
+      }
       resetForm();
       onSaved();
       onClose();
@@ -432,7 +476,7 @@ function AddReminderModal({
         <View style={styles.modalSheet}>
           {/* Handle bar */}
           <View style={styles.modalHandle} />
-          <Text style={styles.modalTitle}>Tambah Peringatan</Text>
+          <Text style={styles.modalTitle}>{initialReminder ? 'Kemaskini Peringatan' : 'Tambah Peringatan'}</Text>
 
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -670,7 +714,8 @@ export default function ScheduleScreen() {
           .from('reminders')
           .select('*, pets(name)')
           .eq('user_id', user.id)
-          .eq('date', dateStr);
+          .eq('date', dateStr)
+          .is('deleted_at', null);
         if (!error && data) setReminders(data as Reminder[]);
       } catch (_) {
       } finally {
@@ -689,6 +734,7 @@ export default function ScheduleScreen() {
         .from('reminders')
         .select('date')
         .eq('user_id', user.id)
+        .is('deleted_at', null)
         .gte('date', from)
         .lte('date', to);
       if (data) {
@@ -717,6 +763,36 @@ export default function ScheduleScreen() {
         );
       }
     } catch (_) {}
+  };
+
+  const [editingReminder, setEditingReminder] = useState<Reminder | null>(null);
+
+  const handleEditReminder = (reminder: Reminder) => {
+    setEditingReminder(reminder);
+    setShowModal(true);
+  };
+
+  const handleDeleteReminder = (id: string) => {
+    Alert.alert(
+      'Padam Peringatan',
+      'Adakah anda pasti ingin memadam peringatan ini?',
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Padam', style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.from('reminders').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+              if (error) throw error;
+              setReminders((prev) => prev.filter((r) => r.id !== id));
+              fetchWeekReminderDates();
+            } catch (err: any) {
+              Alert.alert('Ralat', err?.message ?? 'Gagal memadam peringatan.');
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleSaved = () => {
@@ -820,7 +896,7 @@ export default function ScheduleScreen() {
           </View>
         ) : (
           reminders.map((r) => (
-            <ReminderCard key={r.id} reminder={r} onMarkDone={handleMarkDone} />
+            <ReminderCard key={r.id} reminder={r} onMarkDone={handleMarkDone} onDelete={handleDeleteReminder} onEdit={handleEditReminder} />
           ))
         )}
 
@@ -832,10 +908,11 @@ export default function ScheduleScreen() {
       {user && (
         <AddReminderModal
           visible={showModal}
-          onClose={() => setShowModal(false)}
+          onClose={() => { setShowModal(false); setEditingReminder(null); }}
           onSaved={handleSaved}
           userId={user.id}
           defaultDate={selectedDate}
+          initialReminder={editingReminder}
         />
       )}
     </View>
@@ -860,8 +937,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingTop: 16,
+    paddingBottom: 20,
   },
   headerTitle: {
     color: '#fff',

@@ -369,7 +369,7 @@ export default function DashboardScreen() {
       await Promise.all([
         supabase.from('users').select('name').eq('id', user.id).maybeSingle(),
         supabase.from('pets').select('id, name').eq('user_id', user.id),
-        supabase.from('reminders').select('id, title, time, repeat, status').eq('user_id', user.id).eq('date', today),
+        supabase.from('reminders').select('id, title, time, repeat, is_done').eq('user_id', user.id).eq('date', today),
         supabase.from('expenses').select('amount').eq('user_id', user.id).gte('date', startOfMonth),
         supabase.from('litters').select('id').eq('user_id', user.id),
         supabase.from('reminders').select('id').eq('user_id', user.id).gte('date', today),

@@ -29,6 +29,7 @@ const SAGE = '#81C784';
 const INK = '#1A1A2E';
 const MUTED = '#9E9E9E';
 const WHITE = '#FFFFFF';
+const DANGER = '#EF5350';
 
 const SCREEN_HEIGHT = Dimensions.get('window').height;
 
@@ -119,7 +120,17 @@ function SkeletonCard() {
 }
 
 // ─── Buyer Card ───────────────────────────────────────────────────────────────
-function BuyerCard({ buyer }: { buyer: Buyer }) {
+function BuyerCard({
+  buyer,
+  onDelete,
+  onToggleStatus,
+  onEdit,
+}: {
+  buyer: Buyer;
+  onDelete: (id: string, name: string) => void;
+  onToggleStatus: (id: string, current: BuyerStatus) => void;
+  onEdit: (buyer: Buyer) => void;
+}) {
   const avatarBg = buyer.status === 'belum_bayar' ? ACCENT : SAGE;
   const initials = getInitials(buyer.name);
 
@@ -157,16 +168,28 @@ function BuyerCard({ buyer }: { buyer: Buyer }) {
           </View>
         </View>
 
-        {/* Status badge */}
-        {buyer.status === 'belum_bayar' ? (
-          <View style={styles.badgeAmber}>
-            <Text style={styles.badgeAmberText}>Belum Bayar</Text>
+        {/* Right: status badge + actions */}
+        <View style={{ alignItems: 'flex-end', gap: 6 }}>
+          <TouchableOpacity onPress={() => onToggleStatus(buyer.id, buyer.status)} activeOpacity={0.75}>
+            {buyer.status === 'belum_bayar' ? (
+              <View style={styles.badgeAmber}>
+                <Text style={styles.badgeAmberText}>Belum Bayar</Text>
+              </View>
+            ) : (
+              <View style={styles.badgeSage}>
+                <Text style={styles.badgeSageText}>Selesai</Text>
+              </View>
+            )}
+          </TouchableOpacity>
+          <View style={{ flexDirection: 'row', gap: 10, marginTop: 4 }}>
+            <TouchableOpacity onPress={() => onEdit(buyer)} activeOpacity={0.75}>
+              <Ionicons name="create-outline" size={18} color={PRIMARY} />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => onDelete(buyer.id, buyer.name)} activeOpacity={0.75}>
+              <Ionicons name="trash-outline" size={18} color={DANGER} />
+            </TouchableOpacity>
           </View>
-        ) : (
-          <View style={styles.badgeSage}>
-            <Text style={styles.badgeSageText}>Selesai</Text>
-          </View>
-        )}
+        </View>
       </View>
     </View>
   );
@@ -228,8 +251,9 @@ export default function RecordsScreen() {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState<FilterType>('all');
   const [modalVisible, setModalVisible] = useState(false);
+  const [editingBuyer, setEditingBuyer] = useState<Buyer | null>(null);
 
-  // ── Add Buyer Form State ──
+  // ── Add/Edit Buyer Form State ──
   const [formName, setFormName] = useState('');
   const [formContact, setFormContact] = useState('');
   const [formPrice, setFormPrice] = useState('');
@@ -249,6 +273,7 @@ export default function RecordsScreen() {
         .from('buyers')
         .select('*, buyer_pets(pet_id, pets(name, breed))')
         .eq('user_id', user.id)
+        .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -293,7 +318,20 @@ export default function RecordsScreen() {
 
   // ── Open Modal ────────────────────────────────────────────────────────────
   const openModal = () => {
+    setEditingBuyer(null);
     resetForm();
+    fetchPets();
+    setModalVisible(true);
+  };
+
+  const openEditModal = (buyer: Buyer) => {
+    setEditingBuyer(buyer);
+    setFormName(buyer.name);
+    setFormContact(buyer.contact ?? '');
+    setFormPrice(String(buyer.price));
+    setFormDate(buyer.date ? new Date(buyer.date) : new Date());
+    setFormStatus(buyer.status);
+    setFormSelectedPetId(buyer.buyer_pets?.[0]?.pet_id ?? null);
     fetchPets();
     setModalVisible(true);
   };
@@ -312,10 +350,11 @@ export default function RecordsScreen() {
   // ── Close Modal ───────────────────────────────────────────────────────────
   const closeModal = () => {
     resetForm();
+    setEditingBuyer(null);
     setModalVisible(false);
   };
 
-  // ── Save Buyer ────────────────────────────────────────────────────────────
+  // ── Save Buyer (Insert or Update) ─────────────────────────────────────────
   const saveBuyer = async () => {
     if (!user) return;
 
@@ -333,27 +372,50 @@ export default function RecordsScreen() {
 
     setSaving(true);
     try {
-      const { data: insertedData, error: insertError } = await supabase
-        .from('buyers')
-        .insert({
-          user_id: user.id,
-          name: trimmedName,
-          contact: formContact.trim() || null,
-          price: parsedPrice,
-          date: toYMD(formDate),
-          status: formStatus,
-        })
-        .select()
-        .single();
+      if (editingBuyer) {
+        // ── Update existing buyer ──
+        const { error } = await supabase
+          .from('buyers')
+          .update({
+            name: trimmedName,
+            contact: formContact.trim() || null,
+            price: parsedPrice,
+            date: toYMD(formDate),
+            status: formStatus,
+          })
+          .eq('id', editingBuyer.id);
+        if (error) throw error;
 
-      if (insertError) throw insertError;
+        // Update buyer_pets: delete old, insert new if changed
+        if (formSelectedPetId !== (editingBuyer.buyer_pets?.[0]?.pet_id ?? null)) {
+          await supabase.from('buyer_pets').delete().eq('buyer_id', editingBuyer.id);
+          if (formSelectedPetId) {
+            await supabase.from('buyer_pets').insert({ buyer_id: editingBuyer.id, pet_id: formSelectedPetId });
+          }
+        }
+      } else {
+        // ── Insert new buyer ──
+        const { data: insertedData, error: insertError } = await supabase
+          .from('buyers')
+          .insert({
+            user_id: user.id,
+            name: trimmedName,
+            contact: formContact.trim() || null,
+            price: parsedPrice,
+            date: toYMD(formDate),
+            status: formStatus,
+          })
+          .select()
+          .single();
+        if (insertError) throw insertError;
 
-      if (formSelectedPetId && insertedData?.id) {
-        const { error: bpError } = await supabase.from('buyer_pets').insert({
-          buyer_id: insertedData.id,
-          pet_id: formSelectedPetId,
-        });
-        if (bpError) throw bpError;
+        if (formSelectedPetId && insertedData?.id) {
+          const { error: bpError } = await supabase.from('buyer_pets').insert({
+            buyer_id: insertedData.id,
+            pet_id: formSelectedPetId,
+          });
+          if (bpError) throw bpError;
+        }
       }
 
       await fetchBuyers();
@@ -362,6 +424,41 @@ export default function RecordsScreen() {
       Alert.alert('Ralat menyimpan pembeli.', 'Sila cuba lagi.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Delete Buyer ─────────────────────────────────────────────────────────
+  const handleDeleteBuyer = (id: string, name: string) => {
+    Alert.alert(
+      'Padam Pembeli',
+      `Padam rekod "${name}"? Tindakan ini tidak boleh dibatalkan.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Padam', style: 'destructive',
+          onPress: async () => {
+            try {
+              const { error } = await supabase.from('buyers').update({ deleted_at: new Date().toISOString() }).eq('id', id);
+              if (error) throw error;
+              setBuyers((prev) => prev.filter((b) => b.id !== id));
+            } catch (err: any) {
+              Alert.alert('Ralat', err?.message ?? 'Gagal memadam pembeli.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  // ── Toggle Buyer Status ───────────────────────────────────────────────────
+  const handleToggleStatus = async (id: string, current: BuyerStatus) => {
+    const next: BuyerStatus = current === 'belum_bayar' ? 'selesai' : 'belum_bayar';
+    try {
+      const { error } = await supabase.from('buyers').update({ status: next }).eq('id', id);
+      if (error) throw error;
+      setBuyers((prev) => prev.map((b) => (b.id === id ? { ...b, status: next } : b)));
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal mengemaskini status.');
     }
   };
 
@@ -453,7 +550,7 @@ export default function RecordsScreen() {
             <EmptyState />
           ) : (
             filteredBuyers.map((buyer) => (
-              <BuyerCard key={buyer.id} buyer={buyer} />
+              <BuyerCard key={buyer.id} buyer={buyer} onDelete={handleDeleteBuyer} onToggleStatus={handleToggleStatus} onEdit={openEditModal} />
             ))
           )}
 
@@ -481,7 +578,7 @@ export default function RecordsScreen() {
                   <View style={styles.handleBar} />
 
                   {/* Modal Title */}
-                  <Text style={styles.modalTitle}>Tambah Pembeli</Text>
+                  <Text style={styles.modalTitle}>{editingBuyer ? 'Kemaskini Pembeli' : 'Tambah Pembeli'}</Text>
 
                   <ScrollView
                     showsVerticalScrollIndicator={false}
@@ -685,8 +782,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 36,
+    paddingTop: 16,
+    paddingBottom: 56,
   },
   headerTitle: {
     fontSize: 22,

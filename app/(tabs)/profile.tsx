@@ -278,8 +278,8 @@ const s = StyleSheet.create({
 
   headerRow: {
     paddingHorizontal: 20,
-    paddingTop: 8,
-    paddingBottom: 36,
+    paddingTop: 16,
+    paddingBottom: 56,
   },
   headerTitle: {
     fontSize: 22,
