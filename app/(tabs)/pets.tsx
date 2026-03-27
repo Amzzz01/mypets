@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  Image,
   Modal,
   Platform,
   ScrollView,
@@ -15,6 +16,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
 
@@ -82,6 +84,35 @@ interface EggBatch {
   hatched_count: number;
   status: 'incubating' | 'hatched' | 'failed';
   notes?: string;
+}
+
+interface PetExpense {
+  id: string;
+  pet_id: string;
+  user_id: string;
+  category: string;
+  amount: number;
+  date: string;
+  notes?: string;
+}
+
+interface PetDocument {
+  id: string;
+  pet_id: string;
+  user_id: string;
+  title: string;
+  type: string;
+  date?: string;
+  notes?: string;
+}
+
+interface PetPhoto {
+  id: string;
+  pet_id: string;
+  user_id: string;
+  url: string;
+  caption?: string;
+  created_at: string;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -709,14 +740,334 @@ function AddEggBatchModal({ visible, petId, userId, nextBatchNumber, onClose, on
   );
 }
 
+// ─── Add Health Record Modal ──────────────────────────────────────────────────
+const HEALTH_TYPES = ['Vaksin', 'Rawatan', 'Pembedahan', 'Pemeriksaan', 'Lain-lain'];
+const HEALTH_STATUSES = ['Sihat', 'Rawatan', 'Kritikal', 'Sembuh'];
+
+function AddHealthRecordModal({ visible, petId, userId, onClose, onSuccess }: { visible: boolean; petId: string; userId: string; onClose: () => void; onSuccess: () => void }) {
+  const [title, setTitle] = useState('');
+  const [type, setType] = useState('Pemeriksaan');
+  const [status, setStatus] = useState('Sihat');
+  const [date, setDate] = useState(new Date());
+  const [showPicker, setShowPicker] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => { setTitle(''); setType('Pemeriksaan'); setStatus('Sihat'); setDate(new Date()); setNotes(''); };
+  const handleClose = () => { reset(); onClose(); };
+
+  const handleSave = async () => {
+    if (!title.trim()) { Alert.alert('Ralat', 'Sila masukkan tajuk rekod.'); return; }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('health_records').insert({
+        pet_id: petId,
+        title: title.trim(),
+        type,
+        status,
+        date: toYMD(date),
+        notes: notes.trim() || null,
+      });
+      if (error) throw error;
+      reset(); onSuccess();
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal menyimpan rekod kesihatan.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <Text style={styles.modalTitle}>Tambah Rekod Kesihatan</Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.fieldLabel}>Tajuk *</Text>
+            <TextInput style={styles.textInput} placeholder="cth: Vaksin Rabies" placeholderTextColor={MUTED} value={title} onChangeText={setTitle} />
+
+            <Text style={styles.fieldLabel}>Jenis</Text>
+            <View style={styles.pillGrid}>
+              {HEALTH_TYPES.map((t) => (
+                <TouchableOpacity key={t} style={[styles.pillButton, type === t && styles.pillButtonActive]} onPress={() => setType(t)}>
+                  <Text style={[styles.pillText, type === t && styles.pillTextActive]}>{t}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Status</Text>
+            <View style={styles.pillGrid}>
+              {HEALTH_STATUSES.map((s) => (
+                <TouchableOpacity key={s} style={[styles.pillButton, status === s && styles.pillButtonActive]} onPress={() => setStatus(s)}>
+                  <Text style={[styles.pillText, status === s && styles.pillTextActive]}>{s}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Tarikh</Text>
+            <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
+              <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
+              <Text style={styles.dateButtonText}>{formatDate(toYMD(date))}</Text>
+            </TouchableOpacity>
+            {showPicker && (
+              <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(_: any, s?: Date) => { if (Platform.OS === 'android') setShowPicker(false); if (s) setDate(s); }} />
+            )}
+
+            <Text style={styles.fieldLabel}>Nota</Text>
+            <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
+
+            <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
+              <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleClose} disabled={saving}>
+              <Text style={styles.cancelButtonText}>Batal</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Add Pet Expense Modal ────────────────────────────────────────────────────
+const EXPENSE_CATEGORIES: { label: string; color: string }[] = [
+  { label: 'Makanan', color: '#66BB6A' },
+  { label: 'Ubatan', color: '#42A5F5' },
+  { label: 'Grooming', color: '#AB47BC' },
+  { label: 'Vet', color: '#EF5350' },
+  { label: 'Lain-lain', color: '#9E9E9E' },
+];
+
+function AddPetExpenseModal({ visible, petId, userId, onClose, onSuccess }: { visible: boolean; petId: string; userId: string; onClose: () => void; onSuccess: () => void }) {
+  const [category, setCategory] = useState('Makanan');
+  const [amount, setAmount] = useState('');
+  const [date, setDate] = useState(new Date());
+  const [showPicker, setShowPicker] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => { setCategory('Makanan'); setAmount(''); setDate(new Date()); setNotes(''); };
+  const handleClose = () => { reset(); onClose(); };
+
+  const handleSave = async () => {
+    const amt = parseFloat(amount);
+    if (isNaN(amt) || amt <= 0) { Alert.alert('Ralat', 'Sila masukkan jumlah yang sah.'); return; }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('expenses').insert({
+        user_id: userId,
+        pet_id: petId,
+        category,
+        amount: amt,
+        date: toYMD(date),
+        notes: notes.trim() || null,
+      });
+      if (error) throw error;
+      reset(); onSuccess();
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal menyimpan perbelanjaan.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <Text style={styles.modalTitle}>Tambah Perbelanjaan</Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.fieldLabel}>Kategori</Text>
+            <View style={styles.pillGrid}>
+              {EXPENSE_CATEGORIES.map((c) => (
+                <TouchableOpacity key={c.label} style={[styles.pillButton, category === c.label && { backgroundColor: c.color, borderColor: c.color }]} onPress={() => setCategory(c.label)}>
+                  <Text style={[styles.pillText, category === c.label && { color: '#fff' }]}>{c.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Jumlah (RM) *</Text>
+            <TextInput style={styles.textInput} placeholder="0.00" placeholderTextColor={MUTED} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
+
+            <Text style={styles.fieldLabel}>Tarikh</Text>
+            <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
+              <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
+              <Text style={styles.dateButtonText}>{formatDate(toYMD(date))}</Text>
+            </TouchableOpacity>
+            {showPicker && (
+              <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(_: any, s?: Date) => { if (Platform.OS === 'android') setShowPicker(false); if (s) setDate(s); }} />
+            )}
+
+            <Text style={styles.fieldLabel}>Nota</Text>
+            <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
+
+            <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
+              <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleClose} disabled={saving}>
+              <Text style={styles.cancelButtonText}>Batal</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Add Document Modal ────────────────────────────────────────────────────────
+const DOC_TYPES = ['Kad Vaksin', 'Lesen', 'Sijil Kesihatan', 'Resit Vet', 'Lain-lain'];
+
+function AddDocumentModal({ visible, petId, userId, onClose, onSuccess }: { visible: boolean; petId: string; userId: string; onClose: () => void; onSuccess: () => void }) {
+  const [title, setTitle] = useState('');
+  const [type, setType] = useState('Kad Vaksin');
+  const [date, setDate] = useState(new Date());
+  const [showPicker, setShowPicker] = useState(false);
+  const [notes, setNotes] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => { setTitle(''); setType('Kad Vaksin'); setDate(new Date()); setNotes(''); };
+  const handleClose = () => { reset(); onClose(); };
+
+  const handleSave = async () => {
+    if (!title.trim()) { Alert.alert('Ralat', 'Sila masukkan nama dokumen.'); return; }
+    setSaving(true);
+    try {
+      const { error } = await supabase.from('pet_documents').insert({
+        pet_id: petId,
+        user_id: userId,
+        title: title.trim(),
+        type,
+        date: toYMD(date),
+        notes: notes.trim() || null,
+      });
+      if (error) throw error;
+      reset(); onSuccess();
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal menyimpan dokumen.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <Text style={styles.modalTitle}>Tambah Dokumen</Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <Text style={styles.fieldLabel}>Nama Dokumen *</Text>
+            <TextInput style={styles.textInput} placeholder="cth: Kad Vaksin 2025" placeholderTextColor={MUTED} value={title} onChangeText={setTitle} />
+
+            <Text style={styles.fieldLabel}>Jenis</Text>
+            <View style={styles.pillGrid}>
+              {DOC_TYPES.map((t) => (
+                <TouchableOpacity key={t} style={[styles.pillButton, type === t && styles.pillButtonActive]} onPress={() => setType(t)}>
+                  <Text style={[styles.pillText, type === t && styles.pillTextActive]}>{t}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Text style={styles.fieldLabel}>Tarikh Dokumen</Text>
+            <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
+              <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
+              <Text style={styles.dateButtonText}>{formatDate(toYMD(date))}</Text>
+            </TouchableOpacity>
+            {showPicker && (
+              <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(_: any, s?: Date) => { if (Platform.OS === 'android') setShowPicker(false); if (s) setDate(s); }} />
+            )}
+
+            <Text style={styles.fieldLabel}>Nota</Text>
+            <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
+
+            <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
+              <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleClose} disabled={saving}>
+              <Text style={styles.cancelButtonText}>Batal</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
+// ─── Add Photo Modal ───────────────────────────────────────────────────────────
+function AddPhotoModal({ visible, petId, userId, onClose, onSuccess }: { visible: boolean; petId: string; userId: string; onClose: () => void; onSuccess: () => void }) {
+  const [caption, setCaption] = useState('');
+  const [imageUri, setImageUri] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const reset = () => { setCaption(''); setImageUri(null); };
+  const handleClose = () => { reset(); onClose(); };
+
+  const pickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') { Alert.alert('Kebenaran diperlukan', 'Sila benarkan akses galeri foto.'); return; }
+    const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, quality: 0.7 });
+    if (!result.canceled && result.assets[0]) setImageUri(result.assets[0].uri);
+  };
+
+  const handleSave = async () => {
+    if (!imageUri) { Alert.alert('Ralat', 'Sila pilih gambar terlebih dahulu.'); return; }
+    setSaving(true);
+    try {
+      // Upload to Supabase Storage bucket "pet-photos"
+      const ext = imageUri.split('.').pop() ?? 'jpg';
+      const fileName = `${userId}/${petId}/${Date.now()}.${ext}`;
+      const response = await fetch(imageUri);
+      const blob = await response.blob();
+      const { error: uploadError } = await supabase.storage.from('pet-photos').upload(fileName, blob, { contentType: `image/${ext}` });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(fileName);
+      const { error: insertError } = await supabase.from('pet_photos').insert({
+        pet_id: petId, user_id: userId, url: urlData.publicUrl, caption: caption.trim() || null,
+      });
+      if (insertError) throw insertError;
+      reset(); onSuccess();
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal memuat naik gambar.');
+    } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal visible={visible} transparent animationType="slide" onRequestClose={handleClose}>
+      <View style={styles.modalOverlay}>
+        <View style={styles.modalSheet}>
+          <View style={styles.modalHandle} />
+          <Text style={styles.modalTitle}>Tambah Gambar</Text>
+          <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+            <TouchableOpacity style={styles.photoPickerBox} onPress={pickImage} activeOpacity={0.8}>
+              {imageUri ? (
+                <Image source={{ uri: imageUri }} style={styles.photoPreview} resizeMode="cover" />
+              ) : (
+                <>
+                  <Ionicons name="camera-outline" size={36} color={MUTED} />
+                  <Text style={{ color: MUTED, marginTop: 8 }}>Pilih Gambar</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.fieldLabel}>Kapsyen (pilihan)</Text>
+            <TextInput style={styles.textInput} placeholder="Tulis kapsyen..." placeholderTextColor={MUTED} value={caption} onChangeText={setCaption} />
+
+            <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
+              <Text style={styles.saveButtonText}>{saving ? 'Memuat naik...' : 'Simpan'}</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleClose} disabled={saving}>
+              <Text style={styles.cancelButtonText}>Batal</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 // ─── Pet Detail ───────────────────────────────────────────────────────────────
 interface PetDetailProps {
   pet: Pet;
-  onAddRecord: () => void;
   onEdit: () => void;
 }
 
-function PetDetail({ pet, onAddRecord, onEdit }: PetDetailProps) {
+function PetDetail({ pet, onEdit }: PetDetailProps) {
   const { user } = useAuthStore();
   const isSerama = pet.species === 'Ayam Serama';
 
@@ -743,6 +1094,24 @@ function PetDetail({ pet, onAddRecord, onEdit }: PetDetailProps) {
   // Egg batches
   const [eggBatches, setEggBatches] = useState<EggBatch[]>([]);
   const [loadingEggs, setLoadingEggs] = useState(false);
+
+  // Health records modal
+  const [healthModal, setHealthModal] = useState(false);
+
+  // Pet expenses
+  const [petExpenses, setPetExpenses] = useState<PetExpense[]>([]);
+  const [loadingExpenses, setLoadingExpenses] = useState(false);
+  const [expenseModal, setExpenseModal] = useState(false);
+
+  // Documents
+  const [documents, setDocuments] = useState<PetDocument[]>([]);
+  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [docModal, setDocModal] = useState(false);
+
+  // Photos
+  const [photos, setPhotos] = useState<PetPhoto[]>([]);
+  const [loadingPhotos, setLoadingPhotos] = useState(false);
+  const [photoModal, setPhotoModal] = useState(false);
   const [eggModal, setEggModal] = useState(false);
 
   const fetchStats = useCallback(async () => {
@@ -840,6 +1209,30 @@ function PetDetail({ pet, onAddRecord, onEdit }: PetDetailProps) {
     }
   }, [pet.id]);
 
+  const fetchPetExpenses = useCallback(async () => {
+    setLoadingExpenses(true);
+    try {
+      const { data } = await supabase.from('expenses').select('*').eq('pet_id', pet.id).order('date', { ascending: false });
+      setPetExpenses(data ?? []);
+    } finally { setLoadingExpenses(false); }
+  }, [pet.id]);
+
+  const fetchDocuments = useCallback(async () => {
+    setLoadingDocs(true);
+    try {
+      const { data } = await supabase.from('pet_documents').select('*').eq('pet_id', pet.id).order('created_at', { ascending: false });
+      setDocuments(data ?? []);
+    } finally { setLoadingDocs(false); }
+  }, [pet.id]);
+
+  const fetchPhotos = useCallback(async () => {
+    setLoadingPhotos(true);
+    try {
+      const { data } = await supabase.from('pet_photos').select('*').eq('pet_id', pet.id).order('created_at', { ascending: false });
+      setPhotos(data ?? []);
+    } finally { setLoadingPhotos(false); }
+  }, [pet.id]);
+
   useEffect(() => {
     fetchStats();
     fetchHealthRecords();
@@ -848,7 +1241,10 @@ function PetDetail({ pet, onAddRecord, onEdit }: PetDetailProps) {
   useEffect(() => {
     if (activeTab === 'Pertandingan') fetchShowRecords();
     if (activeTab === 'Telur') fetchEggBatches();
-  }, [activeTab, fetchShowRecords, fetchEggBatches]);
+    if (activeTab === 'Perbelanjaan') fetchPetExpenses();
+    if (activeTab === 'Dokumen') fetchDocuments();
+    if (activeTab === 'Galeri') fetchPhotos();
+  }, [activeTab, fetchShowRecords, fetchEggBatches, fetchPetExpenses, fetchDocuments, fetchPhotos]);
 
   const emoji = SPECIES_EMOJI[pet.species] ?? '🐾';
   const nextBatchNumber = eggBatches.length > 0
@@ -969,7 +1365,7 @@ function PetDetail({ pet, onAddRecord, onEdit }: PetDetailProps) {
               </View>
             ))
           )}
-          <TouchableOpacity style={styles.addRecordButton} onPress={onAddRecord}>
+          <TouchableOpacity style={styles.addRecordButton} onPress={() => setHealthModal(true)}>
             <Text style={styles.addRecordButtonText}>+ Tambah Rekod</Text>
           </TouchableOpacity>
         </View>
@@ -1097,30 +1493,91 @@ function PetDetail({ pet, onAddRecord, onEdit }: PetDetailProps) {
       {/* ── Perbelanjaan ── */}
       {activeTab === 'Perbelanjaan' && (
         <View style={styles.tabContent}>
-          <View style={styles.emptyRecords}>
-            <Ionicons name="wallet-outline" size={40} color={MUTED} />
-            <Text style={styles.emptyRecordsText}>Tiada rekod perbelanjaan</Text>
-          </View>
+          {loadingExpenses ? (
+            <Text style={styles.loadingText}>Memuatkan...</Text>
+          ) : petExpenses.length === 0 ? (
+            <View style={styles.emptyRecords}>
+              <Ionicons name="wallet-outline" size={40} color={MUTED} />
+              <Text style={styles.emptyRecordsText}>Tiada rekod perbelanjaan</Text>
+            </View>
+          ) : (
+            petExpenses.map((exp) => {
+              const cat = EXPENSE_CATEGORIES.find((c) => c.label === exp.category);
+              return (
+                <View key={exp.id} style={styles.recordItem}>
+                  <View style={[styles.recordBar, { backgroundColor: cat?.color ?? MUTED }]} />
+                  <View style={styles.recordBody}>
+                    <Text style={styles.recordTitle}>{exp.category}</Text>
+                    <Text style={styles.recordDate}>{formatDate(exp.date)}{exp.notes ? ` · ${exp.notes}` : ''}</Text>
+                  </View>
+                  <View style={[styles.recordStatusBadge, { backgroundColor: INDIGO_LIGHT }]}>
+                    <Text style={[styles.recordStatusText, { color: PRIMARY }]}>RM {exp.amount.toFixed(2)}</Text>
+                  </View>
+                </View>
+              );
+            })
+          )}
+          <TouchableOpacity style={styles.addRecordButton} onPress={() => setExpenseModal(true)}>
+            <Text style={styles.addRecordButtonText}>+ Tambah Perbelanjaan</Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      {/* ── Galeri (non-Serama) ── */}
+      {/* ── Galeri ── */}
       {activeTab === 'Galeri' && (
         <View style={styles.tabContent}>
-          <View style={styles.emptyRecords}>
-            <Ionicons name="images-outline" size={40} color={MUTED} />
-            <Text style={styles.emptyRecordsText}>Tiada gambar</Text>
-          </View>
+          {loadingPhotos ? (
+            <Text style={styles.loadingText}>Memuatkan...</Text>
+          ) : photos.length === 0 ? (
+            <View style={styles.emptyRecords}>
+              <Ionicons name="images-outline" size={40} color={MUTED} />
+              <Text style={styles.emptyRecordsText}>Tiada gambar</Text>
+            </View>
+          ) : (
+            <View style={styles.photoGrid}>
+              {photos.map((p) => (
+                <View key={p.id} style={styles.photoThumb}>
+                  <Image source={{ uri: p.url }} style={{ width: '100%', height: '100%', borderRadius: 10 }} resizeMode="cover" />
+                  {!!p.caption && <Text style={styles.photoCaption} numberOfLines={1}>{p.caption}</Text>}
+                </View>
+              ))}
+            </View>
+          )}
+          <TouchableOpacity style={styles.addRecordButton} onPress={() => setPhotoModal(true)}>
+            <Text style={styles.addRecordButtonText}>+ Tambah Gambar</Text>
+          </TouchableOpacity>
         </View>
       )}
 
-      {/* ── Dokumen (non-Serama) ── */}
+      {/* ── Dokumen ── */}
       {activeTab === 'Dokumen' && (
         <View style={styles.tabContent}>
-          <View style={styles.emptyRecords}>
-            <Ionicons name="document-outline" size={40} color={MUTED} />
-            <Text style={styles.emptyRecordsText}>Tiada dokumen</Text>
-          </View>
+          {loadingDocs ? (
+            <Text style={styles.loadingText}>Memuatkan...</Text>
+          ) : documents.length === 0 ? (
+            <View style={styles.emptyRecords}>
+              <Ionicons name="document-outline" size={40} color={MUTED} />
+              <Text style={styles.emptyRecordsText}>Tiada dokumen</Text>
+            </View>
+          ) : (
+            documents.map((doc) => (
+              <View key={doc.id} style={styles.recordItem}>
+                <View style={[styles.recordBar, { backgroundColor: PRIMARY }]} />
+                <View style={styles.recordBody}>
+                  <Text style={styles.recordTitle}>{doc.title}</Text>
+                  <Text style={styles.recordDate}>{doc.type}{doc.date ? ` · ${formatDate(doc.date)}` : ''}</Text>
+                </View>
+                {!!doc.notes && (
+                  <View style={[styles.recordStatusBadge, { backgroundColor: INDIGO_LIGHT }]}>
+                    <Text style={[styles.recordStatusText, { color: PRIMARY }]} numberOfLines={1}>{doc.notes}</Text>
+                  </View>
+                )}
+              </View>
+            ))
+          )}
+          <TouchableOpacity style={styles.addRecordButton} onPress={() => setDocModal(true)}>
+            <Text style={styles.addRecordButtonText}>+ Tambah Dokumen</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -1142,6 +1599,42 @@ function PetDetail({ pet, onAddRecord, onEdit }: PetDetailProps) {
           nextBatchNumber={nextBatchNumber}
           onClose={() => setEggModal(false)}
           onSuccess={() => { setEggModal(false); fetchEggBatches(); }}
+        />
+      )}
+      {user && (
+        <AddHealthRecordModal
+          visible={healthModal}
+          petId={pet.id}
+          userId={user.id}
+          onClose={() => setHealthModal(false)}
+          onSuccess={() => { setHealthModal(false); fetchHealthRecords(); fetchStats(); }}
+        />
+      )}
+      {user && (
+        <AddPetExpenseModal
+          visible={expenseModal}
+          petId={pet.id}
+          userId={user.id}
+          onClose={() => setExpenseModal(false)}
+          onSuccess={() => { setExpenseModal(false); fetchPetExpenses(); fetchStats(); }}
+        />
+      )}
+      {user && (
+        <AddDocumentModal
+          visible={docModal}
+          petId={pet.id}
+          userId={user.id}
+          onClose={() => setDocModal(false)}
+          onSuccess={() => { setDocModal(false); fetchDocuments(); }}
+        />
+      )}
+      {user && (
+        <AddPhotoModal
+          visible={photoModal}
+          petId={pet.id}
+          userId={user.id}
+          onClose={() => setPhotoModal(false)}
+          onSuccess={() => { setPhotoModal(false); fetchPhotos(); }}
         />
       )}
     </View>
@@ -1216,7 +1709,6 @@ export default function PetsScreen() {
     );
   };
 
-  const handleAddRecord = () => { Alert.alert('Tambah Rekod', 'Fungsi ini akan datang.'); };
 
   return (
     <View style={styles.safeArea}>
@@ -1297,7 +1789,6 @@ export default function PetsScreen() {
             {selectedPet && (
               <PetDetail
                 pet={selectedPet}
-                onAddRecord={handleAddRecord}
                 onEdit={() => { setEditingPet(selectedPet); setShowEditModal(true); }}
               />
             )}
@@ -1436,6 +1927,11 @@ const styles = StyleSheet.create({
   loadingText: { color: MUTED, textAlign: 'center', paddingVertical: 20 },
   emptyRecords: { alignItems: 'center', paddingVertical: 24, gap: 8 },
   emptyRecordsText: { fontSize: 14, color: MUTED },
+  photoGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  photoThumb: { width: '47%', aspectRatio: 1, borderRadius: 10, backgroundColor: INDIGO_LIGHT, overflow: 'hidden' },
+  photoCaption: { position: 'absolute', bottom: 4, left: 4, right: 4, fontSize: 10, color: '#fff', backgroundColor: 'rgba(0,0,0,0.4)', borderRadius: 4, paddingHorizontal: 4 },
+  photoPickerBox: { height: 180, borderRadius: 14, borderWidth: 2, borderColor: INDIGO_LIGHT, borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', marginBottom: 12, overflow: 'hidden' },
+  photoPreview: { width: '100%', height: '100%' },
 
   // ── Health record item
   recordItem: {

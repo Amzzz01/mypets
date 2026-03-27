@@ -17,6 +17,7 @@
     "expo": "~55.0.8",
     "expo-auth-session": "~55.0.9",
     "expo-constants": "~55.0.9",
+    "expo-image-picker": "~55.0.13",
     "expo-linking": "~55.0.8",
     "expo-localization": "~55.0.9",
     "expo-location": "~55.1.4",
