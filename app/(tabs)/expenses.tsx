@@ -57,11 +57,16 @@ const MONTHS_BM = [
   'Julai', 'Ogos', 'September', 'Oktober', 'November', 'Disember',
 ];
 
-const CATEGORIES: { key: Category; label: string; color: string; icon: React.ComponentProps<typeof Ionicons>['name'] }[] = [
-  { key: 'makanan', label: 'Makanan', color: '#66BB6A', icon: 'restaurant-outline' },
-  { key: 'ubatan', label: 'Ubatan', color: '#42A5F5', icon: 'medkit-outline' },
-  { key: 'grooming', label: 'Grooming', color: '#AB47BC', icon: 'cut-outline' },
-  { key: 'vet', label: 'Vet', color: '#EF5350', icon: 'fitness-outline' },
+const CATEGORIES: {
+  key: Category;
+  label: string;
+  color: string;
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+}[] = [
+  { key: 'makanan',   label: 'Makanan',   color: '#66BB6A', icon: 'restaurant-outline' },
+  { key: 'ubatan',    label: 'Ubatan',    color: '#42A5F5', icon: 'medkit-outline' },
+  { key: 'grooming',  label: 'Grooming',  color: '#AB47BC', icon: 'cut-outline' },
+  { key: 'vet',       label: 'Vet',       color: '#EF5350', icon: 'fitness-outline' },
   { key: 'lain-lain', label: 'Lain-lain', color: '#9E9E9E', icon: 'ellipsis-horizontal-outline' },
 ];
 
@@ -137,7 +142,11 @@ function ExpenseCard({ expense, onDelete }: { expense: Expense; onDelete: () => 
         </View>
         <View style={{ alignItems: 'flex-end', gap: 8 }}>
           <Text style={s.cardAmount}>RM {Number(expense.amount).toFixed(2)}</Text>
-          <TouchableOpacity onPress={onDelete} activeOpacity={0.7} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+          <TouchableOpacity
+            onPress={onDelete}
+            activeOpacity={0.7}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+          >
             <Ionicons name="trash-outline" size={18} color="#EF5350" />
           </TouchableOpacity>
         </View>
@@ -150,7 +159,6 @@ function ExpenseCard({ expense, onDelete }: { expense: Expense; onDelete: () => 
 function SummaryCard({ expenses }: { expenses: Expense[] }) {
   const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
 
-  // Top 3 categories by spend
   const byCat: Record<string, number> = {};
   expenses.forEach((e) => {
     byCat[e.category] = (byCat[e.category] ?? 0) + Number(e.amount);
@@ -173,7 +181,9 @@ function SummaryCard({ expenses }: { expenses: Expense[] }) {
               <View key={key} style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
                 <Text style={[s.summaryBarLabel, { color: cat.color }]}>{cat.label}</Text>
                 <View style={s.summaryBarTrack}>
-                  <View style={[s.summaryBarFill, { width: `${pct}%`, backgroundColor: cat.color }]} />
+                  <View
+                    style={[s.summaryBarFill, { width: `${pct}%`, backgroundColor: cat.color }]}
+                  />
                 </View>
                 <Text style={s.summaryBarValue}>RM {val.toFixed(0)}</Text>
               </View>
@@ -213,6 +223,7 @@ export default function ExpensesScreen() {
       .from('pets')
       .select('id, name')
       .eq('user_id', user.id)
+      .is('deleted_at', null)
       .order('name');
     setPets((data as Pet[]) ?? []);
   }, [user]);
@@ -248,30 +259,17 @@ export default function ExpensesScreen() {
     }
   }, [user, selectedMonth, selectedYear, selectedPetId]);
 
-  useEffect(() => {
-    fetchPets();
-  }, [fetchPets]);
-
-  useEffect(() => {
-    fetchExpenses();
-  }, [fetchExpenses]);
+  useEffect(() => { fetchPets(); }, [fetchPets]);
+  useEffect(() => { fetchExpenses(); }, [fetchExpenses]);
 
   const prevMonth = () => {
-    if (selectedMonth === 0) {
-      setSelectedMonth(11);
-      setSelectedYear((y) => y - 1);
-    } else {
-      setSelectedMonth((m) => m - 1);
-    }
+    if (selectedMonth === 0) { setSelectedMonth(11); setSelectedYear((y) => y - 1); }
+    else { setSelectedMonth((m) => m - 1); }
   };
 
   const nextMonth = () => {
-    if (selectedMonth === 11) {
-      setSelectedMonth(0);
-      setSelectedYear((y) => y + 1);
-    } else {
-      setSelectedMonth((m) => m + 1);
-    }
+    if (selectedMonth === 11) { setSelectedMonth(0); setSelectedYear((y) => y + 1); }
+    else { setSelectedMonth((m) => m + 1); }
   };
 
   const openModal = () => {
@@ -347,11 +345,13 @@ export default function ExpensesScreen() {
 
       {/* ── Body ── */}
       <View style={s.body}>
-        {/* Pet filter chips */}
+
+        {/* ── FIX: Pet filter chips — alignItems + alignSelf prevent vertical stretch ── */}
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
           contentContainerStyle={s.chipRow}
+          style={s.chipScroll}
         >
           {[{ id: null, name: 'Semua' }, ...pets].map((p) => {
             const active = selectedPetId === p.id;
@@ -443,7 +443,8 @@ export default function ExpensesScreen() {
                     <ScrollView
                       horizontal
                       showsHorizontalScrollIndicator={false}
-                      contentContainerStyle={{ gap: 8, paddingBottom: 4 }}
+                      contentContainerStyle={s.formChipRow}
+                      style={s.formChipScroll}
                     >
                       {[{ id: null, name: 'Tiada' }, ...pets].map((p) => {
                         const sel = formPetId === p.id;
@@ -506,7 +507,12 @@ export default function ExpensesScreen() {
                       onPress={() => setShowDatePicker(!showDatePicker)}
                       activeOpacity={0.8}
                     >
-                      <Ionicons name="calendar-outline" size={18} color={PRIMARY} style={{ marginRight: 8 }} />
+                      <Ionicons
+                        name="calendar-outline"
+                        size={18}
+                        color={PRIMARY}
+                        style={{ marginRight: 8 }}
+                      />
                       <Text style={s.dateButtonText}>{formatDate(toYMD(formDate))}</Text>
                     </TouchableOpacity>
                     {showDatePicker && (
@@ -599,11 +605,16 @@ const s = StyleSheet.create({
     marginTop: -28,
   },
 
+  // ── FIX: chip scroll has a fixed intrinsic height so it never stretches ──
+  chipScroll: {
+    flexGrow: 0,          // prevent ScrollView from expanding vertically
+  },
   chipRow: {
     flexDirection: 'row',
+    alignItems: 'center', // keep chips vertically centred inside the scroll
     paddingHorizontal: 16,
     paddingTop: 16,
-    paddingBottom: 8,
+    paddingBottom: 12,
     gap: 8,
   },
   chip: {
@@ -611,6 +622,7 @@ const s = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderWidth: 1.5,
+    alignSelf: 'center',  // don't let individual chips stretch
   },
   chipActive: { backgroundColor: PRIMARY, borderColor: PRIMARY },
   chipInactive: { backgroundColor: WHITE, borderColor: '#E0E0E0' },
@@ -787,6 +799,17 @@ const s = StyleSheet.create({
   },
   formContent: { paddingBottom: 8, gap: 4 },
 
+  // ── FIX: same treatment for the pet pill row inside the modal ──
+  formChipScroll: {
+    flexGrow: 0,
+  },
+  formChipRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingBottom: 4,
+  },
+
   fieldLabel: {
     fontSize: 13,
     fontWeight: '600',
@@ -823,12 +846,13 @@ const s = StyleSheet.create({
   },
   catBtnText: { fontSize: 13, fontWeight: '600' },
 
-  // Pet pills
+  // Pet pills (modal)
   pill: {
     borderRadius: 20,
     paddingVertical: 6,
     paddingHorizontal: 14,
     borderWidth: 1.5,
+    alignSelf: 'center',
   },
   pillActive: { backgroundColor: PRIMARY, borderColor: PRIMARY },
   pillInactive: { backgroundColor: WHITE, borderColor: '#E0E0E0' },

@@ -31,7 +31,6 @@ const MUTED = '#9E9E9E';
 const DANGER = '#EF5350';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = (SCREEN_WIDTH - 44) / 2;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type HealthStatus = 'Sihat' | 'Kurang Sihat' | 'Sakit';
@@ -51,6 +50,7 @@ interface Pet {
   health_status: HealthStatus;
   feather_colour?: string;
   posture_class?: string;
+  avatar_url?: string;
 }
 
 interface HealthRecord {
@@ -185,7 +185,7 @@ function addDays(dateStr: string, days: number): Date {
 }
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
-function SkeletonCard() {
+function SkeletonChip() {
   const opacity = useRef(new Animated.Value(0.3)).current;
   useEffect(() => {
     const pulse = Animated.loop(
@@ -197,7 +197,44 @@ function SkeletonCard() {
     pulse.start();
     return () => pulse.stop();
   }, [opacity]);
-  return <Animated.View style={[styles.skeletonCard, { width: CARD_WIDTH, opacity }]} />;
+  return (
+    <Animated.View style={{ opacity, alignItems: 'center', gap: 6 }}>
+      <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: '#E0E0E0' }} />
+      <View style={{ width: 44, height: 10, borderRadius: 5, backgroundColor: '#E0E0E0' }} />
+    </Animated.View>
+  );
+}
+
+// ─── Pet Chip (horizontal selector) ──────────────────────────────────────────
+interface PetChipProps {
+  pet: Pet;
+  selected: boolean;
+  onPress: () => void;
+  onLongPress: () => void;
+}
+
+function PetChip({ pet, selected, onPress, onLongPress }: PetChipProps) {
+  const emoji = SPECIES_EMOJI[pet.species] ?? '🐾';
+  return (
+    <TouchableOpacity
+      style={styles.chip}
+      onPress={onPress}
+      onLongPress={onLongPress}
+      activeOpacity={0.8}
+    >
+      <View style={[styles.chipAvatar, selected && styles.chipAvatarSelected]}>
+        {pet.avatar_url ? (
+          <Image source={{ uri: pet.avatar_url }} style={styles.chipAvatarImage} />
+        ) : (
+          <Text style={styles.chipEmoji}>{emoji}</Text>
+        )}
+      </View>
+      <Text style={[styles.chipName, selected && styles.chipNameSelected]} numberOfLines={1}>
+        {pet.name}
+      </Text>
+      {selected && <View style={styles.chipDot} />}
+    </TouchableOpacity>
+  );
 }
 
 // ─── Add Pet Modal ────────────────────────────────────────────────────────────
@@ -221,24 +258,15 @@ function AddPetModal({ visible, onClose, onSuccess, userId }: AddPetModalProps) 
   const [saving, setSaving] = useState(false);
 
   const resetForm = () => {
-    setName('');
-    setSpecies('Anjing');
-    setBreed('');
-    setDob(new Date());
-    setShowPicker(false);
-    setGender('Jantan');
-    setWeight('');
-    setFeatherColour('');
-    setPostureClass('');
+    setName(''); setSpecies('Anjing'); setBreed(''); setDob(new Date());
+    setShowPicker(false); setGender('Jantan'); setWeight('');
+    setFeatherColour(''); setPostureClass('');
   };
 
   const handleClose = () => { resetForm(); onClose(); };
 
   const handleSave = async () => {
-    if (!name.trim()) {
-      Alert.alert('Ralat', 'Sila masukkan nama haiwan.');
-      return;
-    }
+    if (!name.trim()) { Alert.alert('Ralat', 'Sila masukkan nama haiwan.'); return; }
     setSaving(true);
     try {
       const { data, error } = await supabase
@@ -279,66 +307,35 @@ function AddPetModal({ visible, onClose, onSuccess, userId }: AddPetModalProps) 
           <View style={styles.modalHandle} />
           <Text style={styles.modalTitle}>Tambah Haiwan Baru</Text>
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-            {/* Name */}
             <Text style={styles.fieldLabel}>Nama</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Nama haiwan"
-              placeholderTextColor={MUTED}
-              value={name}
-              onChangeText={setName}
-            />
+            <TextInput style={styles.textInput} placeholder="Nama haiwan" placeholderTextColor={MUTED} value={name} onChangeText={setName} />
 
-            {/* Species */}
             <Text style={styles.fieldLabel}>Spesies</Text>
             <View style={styles.pillGrid}>
               {SPECIES_LIST.map((s) => (
-                <TouchableOpacity
-                  key={s}
-                  style={[styles.pillButton, species === s && styles.pillButtonActive]}
-                  onPress={() => setSpecies(s)}
-                >
-                  <Text style={[styles.pillText, species === s && styles.pillTextActive]}>
-                    {SPECIES_EMOJI[s]} {s}
-                  </Text>
+                <TouchableOpacity key={s} style={[styles.pillButton, species === s && styles.pillButtonActive]} onPress={() => setSpecies(s)}>
+                  <Text style={[styles.pillText, species === s && styles.pillTextActive]}>{SPECIES_EMOJI[s]} {s}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Breed */}
             <Text style={styles.fieldLabel}>Baka</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Baka"
-              placeholderTextColor={MUTED}
-              value={breed}
-              onChangeText={setBreed}
-            />
+            <TextInput style={styles.textInput} placeholder="Baka" placeholderTextColor={MUTED} value={breed} onChangeText={setBreed} />
 
-            {/* Serama-specific fields */}
             {species === 'Ayam Serama' && (
               <>
                 <Text style={styles.fieldLabel}>Warna Bulu</Text>
                 <View style={styles.pillGrid}>
                   {['Merah Emas', 'Putih', 'Hitam', 'Belang', 'Lain-lain'].map((c) => (
-                    <TouchableOpacity
-                      key={c}
-                      style={[styles.pillButton, featherColour === c && styles.pillButtonActive]}
-                      onPress={() => setFeatherColour(c)}
-                    >
+                    <TouchableOpacity key={c} style={[styles.pillButton, featherColour === c && styles.pillButtonActive]} onPress={() => setFeatherColour(c)}>
                       <Text style={[styles.pillText, featherColour === c && styles.pillTextActive]}>{c}</Text>
                     </TouchableOpacity>
                   ))}
                 </View>
-
                 <Text style={styles.fieldLabel}>Kelas Postur</Text>
                 <View style={styles.pillGrid}>
                   {['Kelas A', 'Kelas B', 'Kelas C', 'Kelas D'].map((k) => (
-                    <TouchableOpacity
-                      key={k}
-                      style={[styles.pillButton, postureClass === k && styles.pillButtonActive]}
-                      onPress={() => setPostureClass(k)}
-                    >
+                    <TouchableOpacity key={k} style={[styles.pillButton, postureClass === k && styles.pillButtonActive]} onPress={() => setPostureClass(k)}>
                       <Text style={[styles.pillText, postureClass === k && styles.pillTextActive]}>{k}</Text>
                     </TouchableOpacity>
                   ))}
@@ -346,52 +343,28 @@ function AddPetModal({ visible, onClose, onSuccess, userId }: AddPetModalProps) 
               </>
             )}
 
-            {/* DOB */}
             <Text style={styles.fieldLabel}>Tarikh Lahir</Text>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
               <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
               <Text style={styles.dateButtonText}>{formatDate(dob.toISOString())}</Text>
             </TouchableOpacity>
             {showPicker && (
-              <DateTimePicker
-                value={dob}
-                mode="date"
-                display={Platform.OS === 'ios' ? 'inline' : 'default'}
-                maximumDate={new Date()}
-                onChange={onDateChange}
-              />
+              <DateTimePicker value={dob} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} maximumDate={new Date()} onChange={onDateChange} />
             )}
 
-            {/* Gender */}
             <Text style={styles.fieldLabel}>Jantina</Text>
             <View style={styles.genderToggle}>
               {(['Jantan', 'Betina'] as Gender[]).map((g) => (
-                <TouchableOpacity
-                  key={g}
-                  style={[styles.genderButton, gender === g && styles.genderButtonActive]}
-                  onPress={() => setGender(g)}
-                >
+                <TouchableOpacity key={g} style={[styles.genderButton, gender === g && styles.genderButtonActive]} onPress={() => setGender(g)}>
                   <Text style={[styles.genderText, gender === g && styles.genderTextActive]}>{g}</Text>
                 </TouchableOpacity>
               ))}
             </View>
 
-            {/* Weight */}
             <Text style={styles.fieldLabel}>Berat (kg)</Text>
-            <TextInput
-              style={styles.textInput}
-              placeholder="Berat (kg)"
-              placeholderTextColor={MUTED}
-              value={weight}
-              onChangeText={setWeight}
-              keyboardType="decimal-pad"
-            />
+            <TextInput style={styles.textInput} placeholder="Berat (kg)" placeholderTextColor={MUTED} value={weight} onChangeText={setWeight} keyboardType="decimal-pad" />
 
-            <TouchableOpacity
-              style={[styles.saveButton, saving && styles.saveButtonDisabled]}
-              onPress={handleSave}
-              disabled={saving}
-            >
+            <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.cancelButton} onPress={handleClose} disabled={saving}>
@@ -447,11 +420,8 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
       const { data, error } = await supabase
         .from('pets')
         .update({
-          name: name.trim(),
-          species,
-          breed: breed.trim(),
-          dob: dob.toISOString().split('T')[0],
-          gender,
+          name: name.trim(), species, breed: breed.trim(),
+          dob: dob.toISOString().split('T')[0], gender,
           weight: weight ? parseFloat(weight) : null,
           health_status: healthStatus,
           feather_colour: species === 'Ayam Serama' ? featherColour || null : null,
@@ -465,9 +435,7 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
       onClose();
     } catch (err: any) {
       Alert.alert('Ralat', err?.message ?? 'Gagal mengemaskini haiwan.');
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   };
 
   const onDateChange = (_event: DateTimePickerEvent, selected?: Date) => {
@@ -562,15 +530,7 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
 }
 
 // ─── Add Show Record Modal ────────────────────────────────────────────────────
-interface AddShowRecordModalProps {
-  visible: boolean;
-  petId: string;
-  userId: string;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-function AddShowRecordModal({ visible, petId, userId, onClose, onSuccess }: AddShowRecordModalProps) {
+function AddShowRecordModal({ visible, petId, userId, onClose, onSuccess }: { visible: boolean; petId: string; userId: string; onClose: () => void; onSuccess: () => void }) {
   const [name, setName] = useState('');
   const [location, setLocation] = useState('');
   const [date, setDate] = useState(new Date());
@@ -579,11 +539,7 @@ function AddShowRecordModal({ visible, petId, userId, onClose, onSuccess }: AddS
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const reset = () => {
-    setName(''); setLocation(''); setDate(new Date());
-    setShowPicker(false); setAward(''); setNotes('');
-  };
-
+  const reset = () => { setName(''); setLocation(''); setDate(new Date()); setShowPicker(false); setAward(''); setNotes(''); };
   const handleClose = () => { reset(); onClose(); };
 
   const handleSave = async () => {
@@ -591,22 +547,14 @@ function AddShowRecordModal({ visible, petId, userId, onClose, onSuccess }: AddS
     setSaving(true);
     try {
       const { error } = await supabase.from('show_records').insert({
-        pet_id: petId,
-        user_id: userId,
-        name: name.trim(),
-        location: location.trim() || null,
-        date: toYMD(date),
-        award: award.trim() || null,
-        notes: notes.trim() || null,
+        pet_id: petId, user_id: userId, name: name.trim(),
+        location: location.trim() || null, date: toYMD(date),
+        award: award.trim() || null, notes: notes.trim() || null,
       });
       if (error) throw error;
-      reset();
-      onSuccess();
-    } catch {
-      Alert.alert('Ralat', 'Gagal menyimpan rekod pertandingan.');
-    } finally {
-      setSaving(false);
-    }
+      reset(); onSuccess();
+    } catch { Alert.alert('Ralat', 'Gagal menyimpan rekod pertandingan.'); }
+    finally { setSaving(false); }
   };
 
   const onDateChange = (_: DateTimePickerEvent, selected?: Date) => {
@@ -623,25 +571,18 @@ function AddShowRecordModal({ visible, petId, userId, onClose, onSuccess }: AddS
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={styles.fieldLabel}>Nama Pertandingan *</Text>
             <TextInput style={styles.textInput} placeholder="Contoh: Kejohanan Serama KL" placeholderTextColor={MUTED} value={name} onChangeText={setName} />
-
             <Text style={styles.fieldLabel}>Lokasi</Text>
             <TextInput style={styles.textInput} placeholder="Contoh: Dewan Komuniti Cheras" placeholderTextColor={MUTED} value={location} onChangeText={setLocation} />
-
             <Text style={styles.fieldLabel}>Tarikh</Text>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
               <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
               <Text style={styles.dateButtonText}>{formatDate(toYMD(date))}</Text>
             </TouchableOpacity>
-            {showPicker && (
-              <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={onDateChange} />
-            )}
-
+            {showPicker && <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={onDateChange} />}
             <Text style={styles.fieldLabel}>Anugerah</Text>
             <TextInput style={styles.textInput} placeholder="Contoh: Juara 1, Naib Johan" placeholderTextColor={MUTED} value={award} onChangeText={setAward} />
-
             <Text style={styles.fieldLabel}>Nota</Text>
             <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
-
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -656,16 +597,7 @@ function AddShowRecordModal({ visible, petId, userId, onClose, onSuccess }: AddS
 }
 
 // ─── Add Egg Batch Modal ──────────────────────────────────────────────────────
-interface AddEggBatchModalProps {
-  visible: boolean;
-  petId: string;
-  userId: string;
-  nextBatchNumber: number;
-  onClose: () => void;
-  onSuccess: () => void;
-}
-
-function AddEggBatchModal({ visible, petId, userId, nextBatchNumber, onClose, onSuccess }: AddEggBatchModalProps) {
+function AddEggBatchModal({ visible, petId, userId, nextBatchNumber, onClose, onSuccess }: { visible: boolean; petId: string; userId: string; nextBatchNumber: number; onClose: () => void; onSuccess: () => void }) {
   const [eggCount, setEggCount] = useState('');
   const [startDate, setStartDate] = useState(new Date());
   const [showPicker, setShowPicker] = useState(false);
@@ -681,23 +613,14 @@ function AddEggBatchModal({ visible, petId, userId, nextBatchNumber, onClose, on
     setSaving(true);
     try {
       const { error } = await supabase.from('egg_batches').insert({
-        pet_id: petId,
-        user_id: userId,
-        batch_number: nextBatchNumber,
-        egg_count: count,
-        start_date: toYMD(startDate),
-        hatched_count: 0,
-        status: 'incubating',
-        notes: notes.trim() || null,
+        pet_id: petId, user_id: userId, batch_number: nextBatchNumber,
+        egg_count: count, start_date: toYMD(startDate),
+        hatched_count: 0, status: 'incubating', notes: notes.trim() || null,
       });
       if (error) throw error;
-      reset();
-      onSuccess();
-    } catch {
-      Alert.alert('Ralat', 'Gagal menyimpan rekod telur.');
-    } finally {
-      setSaving(false);
-    }
+      reset(); onSuccess();
+    } catch { Alert.alert('Ralat', 'Gagal menyimpan rekod telur.'); }
+    finally { setSaving(false); }
   };
 
   const onDateChange = (_: DateTimePickerEvent, selected?: Date) => {
@@ -714,19 +637,14 @@ function AddEggBatchModal({ visible, petId, userId, nextBatchNumber, onClose, on
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={styles.fieldLabel}>Bilangan Telur *</Text>
             <TextInput style={styles.textInput} placeholder="Bilangan telur" placeholderTextColor={MUTED} value={eggCount} onChangeText={setEggCount} keyboardType="number-pad" />
-
             <Text style={styles.fieldLabel}>Tarikh Mula Pengeraman</Text>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
               <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
               <Text style={styles.dateButtonText}>{formatDate(toYMD(startDate))}</Text>
             </TouchableOpacity>
-            {showPicker && (
-              <DateTimePicker value={startDate} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={onDateChange} />
-            )}
-
+            {showPicker && <DateTimePicker value={startDate} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={onDateChange} />}
             <Text style={styles.fieldLabel}>Nota</Text>
             <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
-
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -761,12 +679,7 @@ function AddHealthRecordModal({ visible, petId, userId, onClose, onSuccess }: { 
     setSaving(true);
     try {
       const { error } = await supabase.from('health_records').insert({
-        pet_id: petId,
-        title: title.trim(),
-        type,
-        status,
-        date: toYMD(date),
-        notes: notes.trim() || null,
+        pet_id: petId, title: title.trim(), type, status, date: toYMD(date), notes: notes.trim() || null,
       });
       if (error) throw error;
       reset(); onSuccess();
@@ -784,7 +697,6 @@ function AddHealthRecordModal({ visible, petId, userId, onClose, onSuccess }: { 
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={styles.fieldLabel}>Tajuk *</Text>
             <TextInput style={styles.textInput} placeholder="cth: Vaksin Rabies" placeholderTextColor={MUTED} value={title} onChangeText={setTitle} />
-
             <Text style={styles.fieldLabel}>Jenis</Text>
             <View style={styles.pillGrid}>
               {HEALTH_TYPES.map((t) => (
@@ -793,7 +705,6 @@ function AddHealthRecordModal({ visible, petId, userId, onClose, onSuccess }: { 
                 </TouchableOpacity>
               ))}
             </View>
-
             <Text style={styles.fieldLabel}>Status</Text>
             <View style={styles.pillGrid}>
               {HEALTH_STATUSES.map((s) => (
@@ -802,7 +713,6 @@ function AddHealthRecordModal({ visible, petId, userId, onClose, onSuccess }: { 
                 </TouchableOpacity>
               ))}
             </View>
-
             <Text style={styles.fieldLabel}>Tarikh</Text>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
               <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
@@ -811,10 +721,8 @@ function AddHealthRecordModal({ visible, petId, userId, onClose, onSuccess }: { 
             {showPicker && (
               <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(_: any, s?: Date) => { if (Platform.OS === 'android') setShowPicker(false); if (s) setDate(s); }} />
             )}
-
             <Text style={styles.fieldLabel}>Nota</Text>
             <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
-
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -854,12 +762,7 @@ function AddPetExpenseModal({ visible, petId, userId, onClose, onSuccess }: { vi
     setSaving(true);
     try {
       const { error } = await supabase.from('expenses').insert({
-        user_id: userId,
-        pet_id: petId,
-        category,
-        amount: amt,
-        date: toYMD(date),
-        notes: notes.trim() || null,
+        user_id: userId, pet_id: petId, category, amount: amt, date: toYMD(date), notes: notes.trim() || null,
       });
       if (error) throw error;
       reset(); onSuccess();
@@ -883,10 +786,8 @@ function AddPetExpenseModal({ visible, petId, userId, onClose, onSuccess }: { vi
                 </TouchableOpacity>
               ))}
             </View>
-
             <Text style={styles.fieldLabel}>Jumlah (RM) *</Text>
             <TextInput style={styles.textInput} placeholder="0.00" placeholderTextColor={MUTED} value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-
             <Text style={styles.fieldLabel}>Tarikh</Text>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
               <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
@@ -895,10 +796,8 @@ function AddPetExpenseModal({ visible, petId, userId, onClose, onSuccess }: { vi
             {showPicker && (
               <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(_: any, s?: Date) => { if (Platform.OS === 'android') setShowPicker(false); if (s) setDate(s); }} />
             )}
-
             <Text style={styles.fieldLabel}>Nota</Text>
             <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
-
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -931,12 +830,7 @@ function AddDocumentModal({ visible, petId, userId, onClose, onSuccess }: { visi
     setSaving(true);
     try {
       const { error } = await supabase.from('pet_documents').insert({
-        pet_id: petId,
-        user_id: userId,
-        title: title.trim(),
-        type,
-        date: toYMD(date),
-        notes: notes.trim() || null,
+        pet_id: petId, user_id: userId, title: title.trim(), type, date: toYMD(date), notes: notes.trim() || null,
       });
       if (error) throw error;
       reset(); onSuccess();
@@ -954,7 +848,6 @@ function AddDocumentModal({ visible, petId, userId, onClose, onSuccess }: { visi
           <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             <Text style={styles.fieldLabel}>Nama Dokumen *</Text>
             <TextInput style={styles.textInput} placeholder="cth: Kad Vaksin 2025" placeholderTextColor={MUTED} value={title} onChangeText={setTitle} />
-
             <Text style={styles.fieldLabel}>Jenis</Text>
             <View style={styles.pillGrid}>
               {DOC_TYPES.map((t) => (
@@ -963,7 +856,6 @@ function AddDocumentModal({ visible, petId, userId, onClose, onSuccess }: { visi
                 </TouchableOpacity>
               ))}
             </View>
-
             <Text style={styles.fieldLabel}>Tarikh Dokumen</Text>
             <TouchableOpacity style={styles.dateButton} onPress={() => setShowPicker(!showPicker)}>
               <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
@@ -972,10 +864,8 @@ function AddDocumentModal({ visible, petId, userId, onClose, onSuccess }: { visi
             {showPicker && (
               <DateTimePicker value={date} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} onChange={(_: any, s?: Date) => { if (Platform.OS === 'android') setShowPicker(false); if (s) setDate(s); }} />
             )}
-
             <Text style={styles.fieldLabel}>Nota</Text>
             <TextInput style={[styles.textInput, { height: 72, textAlignVertical: 'top' }]} placeholder="Nota tambahan..." placeholderTextColor={MUTED} value={notes} onChangeText={setNotes} multiline />
-
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -1009,7 +899,6 @@ function AddPhotoModal({ visible, petId, userId, onClose, onSuccess }: { visible
     if (!imageUri) { Alert.alert('Ralat', 'Sila pilih gambar terlebih dahulu.'); return; }
     setSaving(true);
     try {
-      // Upload to Supabase Storage bucket "pet-photos"
       const ext = imageUri.split('.').pop() ?? 'jpg';
       const fileName = `${userId}/${petId}/${Date.now()}.${ext}`;
       const response = await fetch(imageUri);
@@ -1044,10 +933,8 @@ function AddPhotoModal({ visible, petId, userId, onClose, onSuccess }: { visible
                 </>
               )}
             </TouchableOpacity>
-
             <Text style={styles.fieldLabel}>Kapsyen (pilihan)</Text>
             <TextInput style={styles.textInput} placeholder="Tulis kapsyen..." placeholderTextColor={MUTED} value={caption} onChangeText={setCaption} />
-
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Memuat naik...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -1065,9 +952,10 @@ function AddPhotoModal({ visible, petId, userId, onClose, onSuccess }: { visible
 interface PetDetailProps {
   pet: Pet;
   onEdit: () => void;
+  onAvatarUpdate: (updated: Pet) => void;
 }
 
-function PetDetail({ pet, onEdit }: PetDetailProps) {
+function PetDetail({ pet, onEdit, onAvatarUpdate }: PetDetailProps) {
   const { user } = useAuthStore();
   const isSerama = pet.species === 'Ayam Serama';
 
@@ -1078,135 +966,126 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
   const [activeTab, setActiveTab] = useState<TabKey>('Kesihatan');
   const [healthRecords, setHealthRecords] = useState<HealthRecord[]>([]);
   const [loadingRecords, setLoadingRecords] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  // Stats
   const [vaccinCount, setVaccinCount] = useState<number | null>(null);
   const [expense, setExpense] = useState<number | null>(null);
   const [appointmentCount, setAppointmentCount] = useState<number | null>(null);
   const [showCount, setShowCount] = useState<number | null>(null);
   const [awardCount, setAwardCount] = useState<number | null>(null);
 
-  // Show records
   const [showRecords, setShowRecords] = useState<ShowRecord[]>([]);
   const [loadingShows, setLoadingShows] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  // Egg batches
   const [eggBatches, setEggBatches] = useState<EggBatch[]>([]);
   const [loadingEggs, setLoadingEggs] = useState(false);
 
-  // Health records modal
   const [healthModal, setHealthModal] = useState(false);
 
-  // Pet expenses
   const [petExpenses, setPetExpenses] = useState<PetExpense[]>([]);
   const [loadingExpenses, setLoadingExpenses] = useState(false);
   const [expenseModal, setExpenseModal] = useState(false);
 
-  // Documents
   const [documents, setDocuments] = useState<PetDocument[]>([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
   const [docModal, setDocModal] = useState(false);
 
-  // Photos
   const [photos, setPhotos] = useState<PetPhoto[]>([]);
   const [loadingPhotos, setLoadingPhotos] = useState(false);
   const [photoModal, setPhotoModal] = useState(false);
   const [eggModal, setEggModal] = useState(false);
 
+  // ── Avatar upload ──────────────────────────────────────────────────────────
+  const handleAvatarPress = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Kebenaran diperlukan', 'Sila benarkan akses galeri foto.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const uri = result.assets[0].uri;
+    setUploadingAvatar(true);
+    try {
+      const ext = uri.split('.').pop() ?? 'jpg';
+      // Use a fixed filename per pet so repeated uploads replace the previous avatar
+      const fileName = `avatars/${user!.id}/${pet.id}.${ext}`;
+      const response = await fetch(uri);
+      const blob = await response.blob();
+      const { error: uploadError } = await supabase.storage
+        .from('pet-photos')
+        .upload(fileName, blob, { contentType: `image/${ext}`, upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(fileName);
+      // Append cache-buster so React Native re-renders the image
+      const avatarUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+      const { data: updated, error: updateError } = await supabase
+        .from('pets')
+        .update({ avatar_url: avatarUrl })
+        .eq('id', pet.id)
+        .select()
+        .single();
+      if (updateError) throw updateError;
+      onAvatarUpdate(updated as Pet);
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal memuat naik gambar profil.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
   const fetchStats = useCallback(async () => {
     try {
       if (isSerama) {
-        const { count: sc } = await supabase
-          .from('show_records')
-          .select('id', { count: 'exact', head: true })
-          .eq('pet_id', pet.id);
+        const { count: sc } = await supabase.from('show_records').select('id', { count: 'exact', head: true }).eq('pet_id', pet.id);
         setShowCount(sc ?? 0);
-
-        const { count: ac } = await supabase
-          .from('show_records')
-          .select('id', { count: 'exact', head: true })
-          .eq('pet_id', pet.id)
-          .not('award', 'is', null);
+        const { count: ac } = await supabase.from('show_records').select('id', { count: 'exact', head: true }).eq('pet_id', pet.id).not('award', 'is', null);
         setAwardCount(ac ?? 0);
       } else {
-        const { count: vc } = await supabase
-          .from('health_records')
-          .select('id', { count: 'exact', head: true })
-          .eq('pet_id', pet.id)
-          .eq('type', 'vaksin');
+        const { count: vc } = await supabase.from('health_records').select('id', { count: 'exact', head: true }).eq('pet_id', pet.id).eq('type', 'vaksin');
         setVaccinCount(vc ?? 0);
-
         const now = new Date();
         const firstDay = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().split('T')[0];
         const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).toISOString().split('T')[0];
-        const { data: expData } = await supabase
-          .from('expenses')
-          .select('amount')
-          .eq('pet_id', pet.id)
-          .gte('date', firstDay)
-          .lte('date', lastDay);
-        const total = (expData ?? []).reduce(
-          (sum: number, r: { amount: number }) => sum + (r.amount ?? 0), 0
-        );
-        setExpense(total);
-
+        const { data: expData } = await supabase.from('expenses').select('amount').eq('pet_id', pet.id).gte('date', firstDay).lte('date', lastDay);
+        setExpense((expData ?? []).reduce((sum: number, r: { amount: number }) => sum + (r.amount ?? 0), 0));
         const todayStr = new Date().toISOString().split('T')[0];
-        const { count: rc } = await supabase
-          .from('reminders')
-          .select('id', { count: 'exact', head: true })
-          .eq('pet_id', pet.id)
-          .gte('date', todayStr);
+        const { count: rc } = await supabase.from('reminders').select('id', { count: 'exact', head: true }).eq('pet_id', pet.id).gte('date', todayStr);
         setAppointmentCount(rc ?? 0);
       }
-    } catch {
-      // non-critical
-    }
+    } catch { /* non-critical */ }
   }, [pet.id, isSerama]);
 
   const fetchHealthRecords = useCallback(async () => {
     setLoadingRecords(true);
     try {
-      const { data, error } = await supabase
-        .from('health_records')
-        .select('*')
-        .eq('pet_id', pet.id)
-        .order('date', { ascending: false });
+      const { data, error } = await supabase.from('health_records').select('*').eq('pet_id', pet.id).order('date', { ascending: false });
       if (error) throw error;
       setHealthRecords(data ?? []);
-    } catch {
-      setHealthRecords([]);
-    } finally {
-      setLoadingRecords(false);
-    }
+    } catch { setHealthRecords([]); }
+    finally { setLoadingRecords(false); }
   }, [pet.id]);
 
   const fetchShowRecords = useCallback(async () => {
     setLoadingShows(true);
     try {
-      const { data } = await supabase
-        .from('show_records')
-        .select('*')
-        .eq('pet_id', pet.id)
-        .order('date', { ascending: false });
+      const { data } = await supabase.from('show_records').select('*').eq('pet_id', pet.id).order('date', { ascending: false });
       setShowRecords(data ?? []);
-    } finally {
-      setLoadingShows(false);
-    }
+    } finally { setLoadingShows(false); }
   }, [pet.id]);
 
   const fetchEggBatches = useCallback(async () => {
     setLoadingEggs(true);
     try {
-      const { data } = await supabase
-        .from('egg_batches')
-        .select('*')
-        .eq('pet_id', pet.id)
-        .order('created_at', { ascending: false });
+      const { data } = await supabase.from('egg_batches').select('*').eq('pet_id', pet.id).order('created_at', { ascending: false });
       setEggBatches(data ?? []);
-    } finally {
-      setLoadingEggs(false);
-    }
+    } finally { setLoadingEggs(false); }
   }, [pet.id]);
 
   const fetchPetExpenses = useCallback(async () => {
@@ -1233,10 +1112,7 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
     } finally { setLoadingPhotos(false); }
   }, [pet.id]);
 
-  useEffect(() => {
-    fetchStats();
-    fetchHealthRecords();
-  }, [fetchStats, fetchHealthRecords]);
+  useEffect(() => { fetchStats(); fetchHealthRecords(); }, [fetchStats, fetchHealthRecords]);
 
   useEffect(() => {
     if (activeTab === 'Pertandingan') fetchShowRecords();
@@ -1247,17 +1123,31 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
   }, [activeTab, fetchShowRecords, fetchEggBatches, fetchPetExpenses, fetchDocuments, fetchPhotos]);
 
   const emoji = SPECIES_EMOJI[pet.species] ?? '🐾';
-  const nextBatchNumber = eggBatches.length > 0
-    ? Math.max(...eggBatches.map((b) => b.batch_number)) + 1
-    : 1;
+  const nextBatchNumber = eggBatches.length > 0 ? Math.max(...eggBatches.map((b) => b.batch_number)) + 1 : 1;
 
   return (
     <View style={styles.detailCard}>
       {/* Top row */}
       <View style={styles.detailTopRow}>
-        <View style={styles.detailAvatar}>
-          <Text style={styles.detailAvatarEmoji}>{emoji}</Text>
-        </View>
+        {/* Tappable avatar with upload badge */}
+        <TouchableOpacity onPress={handleAvatarPress} activeOpacity={0.8} disabled={uploadingAvatar}>
+          <View style={styles.detailAvatar}>
+            {pet.avatar_url ? (
+              <Image source={{ uri: pet.avatar_url }} style={styles.detailAvatarImage} />
+            ) : (
+              <Text style={styles.detailAvatarEmoji}>{emoji}</Text>
+            )}
+            {uploadingAvatar && (
+              <View style={styles.avatarLoadingOverlay}>
+                <Text style={{ color: '#fff', fontSize: 10 }}>...</Text>
+              </View>
+            )}
+          </View>
+          <View style={styles.avatarEditBadge}>
+            <Ionicons name="camera" size={10} color="#FFFFFF" />
+          </View>
+        </TouchableOpacity>
+
         <View style={styles.detailInfo}>
           <Text style={styles.detailName}>{pet.name}</Text>
           <Text style={styles.detailBreed}>{pet.breed || '—'}</Text>
@@ -1297,33 +1187,15 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
       <View style={styles.statsRow}>
         {isSerama ? (
           <>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Pertandingan</Text>
-              <Text style={styles.statValue}>{showCount === null ? '—' : String(showCount)}</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Anugerah</Text>
-              <Text style={styles.statValue}>{awardCount === null ? '—' : String(awardCount)}</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Berat</Text>
-              <Text style={styles.statValue}>{pet.weight ? `${pet.weight}kg` : '—'}</Text>
-            </View>
+            <View style={styles.statBox}><Text style={styles.statLabel}>Pertandingan</Text><Text style={styles.statValue}>{showCount === null ? '—' : String(showCount)}</Text></View>
+            <View style={styles.statBox}><Text style={styles.statLabel}>Anugerah</Text><Text style={styles.statValue}>{awardCount === null ? '—' : String(awardCount)}</Text></View>
+            <View style={styles.statBox}><Text style={styles.statLabel}>Berat</Text><Text style={styles.statValue}>{pet.weight ? `${pet.weight}kg` : '—'}</Text></View>
           </>
         ) : (
           <>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Vaksin</Text>
-              <Text style={styles.statValue}>{vaccinCount === null ? '—' : vaccinCount === 0 ? '—' : String(vaccinCount)}</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Perbelanjaan</Text>
-              <Text style={styles.statValue}>{expense === null ? '—' : expense === 0 ? '—' : `RM${expense.toFixed(2)}`}</Text>
-            </View>
-            <View style={styles.statBox}>
-              <Text style={styles.statLabel}>Temujanji</Text>
-              <Text style={styles.statValue}>{appointmentCount === null ? '—' : appointmentCount === 0 ? '—' : String(appointmentCount)}</Text>
-            </View>
+            <View style={styles.statBox}><Text style={styles.statLabel}>Vaksin</Text><Text style={styles.statValue}>{vaccinCount === null || vaccinCount === 0 ? '—' : String(vaccinCount)}</Text></View>
+            <View style={styles.statBox}><Text style={styles.statLabel}>Perbelanjaan</Text><Text style={styles.statValue}>{expense === null || expense === 0 ? '—' : `RM${expense.toFixed(2)}`}</Text></View>
+            <View style={styles.statBox}><Text style={styles.statLabel}>Temujanji</Text><Text style={styles.statValue}>{appointmentCount === null || appointmentCount === 0 ? '—' : String(appointmentCount)}</Text></View>
           </>
         )}
       </View>
@@ -1331,11 +1203,7 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
       {/* Tab grid */}
       <View style={styles.tabGrid}>
         {TABS.map((tab) => (
-          <TouchableOpacity
-            key={tab}
-            style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]}
-            onPress={() => setActiveTab(tab)}
-          >
+          <TouchableOpacity key={tab} style={[styles.tabButton, activeTab === tab && styles.tabButtonActive]} onPress={() => setActiveTab(tab)}>
             <Text style={[styles.tabText, activeTab === tab && styles.tabTextActive]}>{tab}</Text>
           </TouchableOpacity>
         ))}
@@ -1344,15 +1212,13 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
       {/* ── Kesihatan ── */}
       {activeTab === 'Kesihatan' && (
         <View style={styles.tabContent}>
-          {loadingRecords ? (
-            <Text style={styles.loadingText}>Memuatkan...</Text>
-          ) : healthRecords.length === 0 ? (
-            <View style={styles.emptyRecords}>
-              <Ionicons name="medkit-outline" size={40} color={MUTED} />
-              <Text style={styles.emptyRecordsText}>Tiada rekod kesihatan</Text>
-            </View>
-          ) : (
-            healthRecords.map((record) => (
+          {loadingRecords ? <Text style={styles.loadingText}>Memuatkan...</Text>
+            : healthRecords.length === 0 ? (
+              <View style={styles.emptyRecords}>
+                <Ionicons name="medkit-outline" size={40} color={MUTED} />
+                <Text style={styles.emptyRecordsText}>Tiada rekod kesihatan</Text>
+              </View>
+            ) : healthRecords.map((record) => (
               <View key={record.id} style={styles.recordItem}>
                 <View style={[styles.recordBar, { backgroundColor: getRecordTypeColor(record.type) }]} />
                 <View style={styles.recordBody}>
@@ -1363,32 +1229,27 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
                   <Text style={styles.recordStatusText}>{record.status}</Text>
                 </View>
               </View>
-            ))
-          )}
+            ))}
           <TouchableOpacity style={styles.addRecordButton} onPress={() => setHealthModal(true)}>
             <Text style={styles.addRecordButtonText}>+ Tambah Rekod</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* ── Pertandingan (Serama only) ── */}
+      {/* ── Pertandingan ── */}
       {activeTab === 'Pertandingan' && (
         <View style={styles.tabContent}>
-          {loadingShows ? (
-            <Text style={styles.loadingText}>Memuatkan...</Text>
-          ) : showRecords.length === 0 ? (
-            <View style={styles.emptyRecords}>
-              <Ionicons name="trophy-outline" size={40} color={MUTED} />
-              <Text style={styles.emptyRecordsText}>Tiada rekod pertandingan</Text>
-            </View>
-          ) : (
-            showRecords.map((rec) => (
+          {loadingShows ? <Text style={styles.loadingText}>Memuatkan...</Text>
+            : showRecords.length === 0 ? (
+              <View style={styles.emptyRecords}>
+                <Ionicons name="trophy-outline" size={40} color={MUTED} />
+                <Text style={styles.emptyRecordsText}>Tiada rekod pertandingan</Text>
+              </View>
+            ) : showRecords.map((rec) => (
               <View key={rec.id} style={styles.showItem}>
                 <View style={styles.showItemLeft}>
                   <Text style={styles.showItemName}>{rec.name}</Text>
-                  <Text style={styles.showItemMeta}>
-                    {formatDate(rec.date)}{rec.location ? ` · ${rec.location}` : ''}
-                  </Text>
+                  <Text style={styles.showItemMeta}>{formatDate(rec.date)}{rec.location ? ` · ${rec.location}` : ''}</Text>
                 </View>
                 {rec.award ? (
                   <View style={styles.awardBadge}>
@@ -1397,93 +1258,61 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
                   </View>
                 ) : null}
               </View>
-            ))
-          )}
+            ))}
           <TouchableOpacity style={styles.addRecordButton} onPress={() => setShowModal(true)}>
             <Text style={styles.addRecordButtonText}>+ Tambah Rekod Pertandingan</Text>
           </TouchableOpacity>
         </View>
       )}
 
-      {/* ── Telur (Serama only) ── */}
+      {/* ── Telur ── */}
       {activeTab === 'Telur' && (
         <View style={styles.tabContent}>
-          {/* Summary metrics */}
           <View style={styles.eggSummaryRow}>
             <View style={styles.eggSummaryBox}>
-              <Text style={styles.eggSummaryValue}>
-                {eggBatches
-                  .filter((b) => b.status === 'incubating')
-                  .reduce((s, b) => s + b.egg_count, 0)}
-              </Text>
+              <Text style={styles.eggSummaryValue}>{eggBatches.filter((b) => b.status === 'incubating').reduce((s, b) => s + b.egg_count, 0)}</Text>
               <Text style={styles.eggSummaryLabel}>Telur Aktif</Text>
             </View>
             <View style={[styles.eggSummaryBox, { backgroundColor: '#E8F5E9' }]}>
-              <Text style={[styles.eggSummaryValue, { color: '#2E7D32' }]}>
-                {eggBatches.reduce((s, b) => s + b.hatched_count, 0)}
-              </Text>
+              <Text style={[styles.eggSummaryValue, { color: '#2E7D32' }]}>{eggBatches.reduce((s, b) => s + b.hatched_count, 0)}</Text>
               <Text style={styles.eggSummaryLabel}>Telah Menetas</Text>
             </View>
           </View>
-
-          {loadingEggs ? (
-            <Text style={styles.loadingText}>Memuatkan...</Text>
-          ) : eggBatches.length === 0 ? (
-            <View style={styles.emptyRecords}>
-              <Text style={{ fontSize: 36 }}>🥚</Text>
-              <Text style={styles.emptyRecordsText}>Tiada rekod telur</Text>
-            </View>
-          ) : (
-            eggBatches.map((batch) => {
-              const daysElapsed = Math.floor(
-                (Date.now() - new Date(batch.start_date).getTime()) / (1000 * 60 * 60 * 24)
-              );
+          {loadingEggs ? <Text style={styles.loadingText}>Memuatkan...</Text>
+            : eggBatches.length === 0 ? (
+              <View style={styles.emptyRecords}>
+                <Text style={{ fontSize: 36 }}>🥚</Text>
+                <Text style={styles.emptyRecordsText}>Tiada rekod telur</Text>
+              </View>
+            ) : eggBatches.map((batch) => {
+              const daysElapsed = Math.floor((Date.now() - new Date(batch.start_date).getTime()) / (1000 * 60 * 60 * 24));
               const hatchDate = addDays(batch.start_date, 21);
               const daysRemaining = 21 - daysElapsed;
               const progress = Math.min(Math.max(daysElapsed / 21, 0), 1);
-
               return (
                 <View key={batch.id} style={styles.eggBatchCard}>
                   <View style={styles.eggBatchHeader}>
-                    <Text style={styles.eggBatchTitle}>
-                      Batch #{batch.batch_number} — {batch.egg_count} biji
-                    </Text>
+                    <Text style={styles.eggBatchTitle}>Batch #{batch.batch_number} — {batch.egg_count} biji</Text>
                     {batch.status === 'hatched' ? (
-                      <View style={styles.hatchedBadge}>
-                        <Text style={styles.hatchedBadgeText}>Menetas</Text>
-                      </View>
+                      <View style={styles.hatchedBadge}><Text style={styles.hatchedBadgeText}>Menetas</Text></View>
                     ) : daysRemaining <= 3 && daysRemaining >= 0 ? (
                       <View style={[styles.eggProgressBadge, { backgroundColor: '#E8F5E9' }]}>
-                        <Text style={[styles.eggProgressBadgeText, { color: '#2E7D32' }]}>
-                          Menetas {daysRemaining} hari lagi
-                        </Text>
+                        <Text style={[styles.eggProgressBadgeText, { color: '#2E7D32' }]}>Menetas {daysRemaining} hari lagi</Text>
                       </View>
                     ) : (
                       <View style={[styles.eggProgressBadge, { backgroundColor: INDIGO_LIGHT }]}>
-                        <Text style={[styles.eggProgressBadgeText, { color: PRIMARY }]}>
-                          Hari ke-{Math.min(daysElapsed, 21)} / 21
-                        </Text>
+                        <Text style={[styles.eggProgressBadgeText, { color: PRIMARY }]}>Hari ke-{Math.min(daysElapsed, 21)} / 21</Text>
                       </View>
                     )}
                   </View>
-
-                  <Text style={styles.eggBatchMeta}>
-                    Mula: {formatDate(batch.start_date)} · Jangka menetas: {formatDate(hatchDate.toISOString())}
-                  </Text>
-
-                  {/* Progress bar */}
+                  <Text style={styles.eggBatchMeta}>Mula: {formatDate(batch.start_date)} · Jangka menetas: {formatDate(hatchDate.toISOString())}</Text>
                   <View style={styles.progressTrack}>
                     <View style={[styles.progressFill, { width: `${progress * 100}%` }]} />
                   </View>
-
-                  {batch.notes ? (
-                    <Text style={styles.eggBatchNotes}>{batch.notes}</Text>
-                  ) : null}
+                  {batch.notes ? <Text style={styles.eggBatchNotes}>{batch.notes}</Text> : null}
                 </View>
               );
-            })
-          )}
-
+            })}
           <TouchableOpacity style={styles.addRecordButton} onPress={() => setEggModal(true)}>
             <Text style={styles.addRecordButtonText}>+ Rekod Batch Telur Baru</Text>
           </TouchableOpacity>
@@ -1493,15 +1322,13 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
       {/* ── Perbelanjaan ── */}
       {activeTab === 'Perbelanjaan' && (
         <View style={styles.tabContent}>
-          {loadingExpenses ? (
-            <Text style={styles.loadingText}>Memuatkan...</Text>
-          ) : petExpenses.length === 0 ? (
-            <View style={styles.emptyRecords}>
-              <Ionicons name="wallet-outline" size={40} color={MUTED} />
-              <Text style={styles.emptyRecordsText}>Tiada rekod perbelanjaan</Text>
-            </View>
-          ) : (
-            petExpenses.map((exp) => {
+          {loadingExpenses ? <Text style={styles.loadingText}>Memuatkan...</Text>
+            : petExpenses.length === 0 ? (
+              <View style={styles.emptyRecords}>
+                <Ionicons name="wallet-outline" size={40} color={MUTED} />
+                <Text style={styles.emptyRecordsText}>Tiada rekod perbelanjaan</Text>
+              </View>
+            ) : petExpenses.map((exp) => {
               const cat = EXPENSE_CATEGORIES.find((c) => c.label === exp.category);
               return (
                 <View key={exp.id} style={styles.recordItem}>
@@ -1515,8 +1342,7 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
                   </View>
                 </View>
               );
-            })
-          )}
+            })}
           <TouchableOpacity style={styles.addRecordButton} onPress={() => setExpenseModal(true)}>
             <Text style={styles.addRecordButtonText}>+ Tambah Perbelanjaan</Text>
           </TouchableOpacity>
@@ -1526,23 +1352,22 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
       {/* ── Galeri ── */}
       {activeTab === 'Galeri' && (
         <View style={styles.tabContent}>
-          {loadingPhotos ? (
-            <Text style={styles.loadingText}>Memuatkan...</Text>
-          ) : photos.length === 0 ? (
-            <View style={styles.emptyRecords}>
-              <Ionicons name="images-outline" size={40} color={MUTED} />
-              <Text style={styles.emptyRecordsText}>Tiada gambar</Text>
-            </View>
-          ) : (
-            <View style={styles.photoGrid}>
-              {photos.map((p) => (
-                <View key={p.id} style={styles.photoThumb}>
-                  <Image source={{ uri: p.url }} style={{ width: '100%', height: '100%', borderRadius: 10 }} resizeMode="cover" />
-                  {!!p.caption && <Text style={styles.photoCaption} numberOfLines={1}>{p.caption}</Text>}
-                </View>
-              ))}
-            </View>
-          )}
+          {loadingPhotos ? <Text style={styles.loadingText}>Memuatkan...</Text>
+            : photos.length === 0 ? (
+              <View style={styles.emptyRecords}>
+                <Ionicons name="images-outline" size={40} color={MUTED} />
+                <Text style={styles.emptyRecordsText}>Tiada gambar</Text>
+              </View>
+            ) : (
+              <View style={styles.photoGrid}>
+                {photos.map((p) => (
+                  <View key={p.id} style={styles.photoThumb}>
+                    <Image source={{ uri: p.url }} style={{ width: '100%', height: '100%', borderRadius: 10 }} resizeMode="cover" />
+                    {!!p.caption && <Text style={styles.photoCaption} numberOfLines={1}>{p.caption}</Text>}
+                  </View>
+                ))}
+              </View>
+            )}
           <TouchableOpacity style={styles.addRecordButton} onPress={() => setPhotoModal(true)}>
             <Text style={styles.addRecordButtonText}>+ Tambah Gambar</Text>
           </TouchableOpacity>
@@ -1552,15 +1377,13 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
       {/* ── Dokumen ── */}
       {activeTab === 'Dokumen' && (
         <View style={styles.tabContent}>
-          {loadingDocs ? (
-            <Text style={styles.loadingText}>Memuatkan...</Text>
-          ) : documents.length === 0 ? (
-            <View style={styles.emptyRecords}>
-              <Ionicons name="document-outline" size={40} color={MUTED} />
-              <Text style={styles.emptyRecordsText}>Tiada dokumen</Text>
-            </View>
-          ) : (
-            documents.map((doc) => (
+          {loadingDocs ? <Text style={styles.loadingText}>Memuatkan...</Text>
+            : documents.length === 0 ? (
+              <View style={styles.emptyRecords}>
+                <Ionicons name="document-outline" size={40} color={MUTED} />
+                <Text style={styles.emptyRecordsText}>Tiada dokumen</Text>
+              </View>
+            ) : documents.map((doc) => (
               <View key={doc.id} style={styles.recordItem}>
                 <View style={[styles.recordBar, { backgroundColor: PRIMARY }]} />
                 <View style={styles.recordBody}>
@@ -1573,8 +1396,7 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
                   </View>
                 )}
               </View>
-            ))
-          )}
+            ))}
           <TouchableOpacity style={styles.addRecordButton} onPress={() => setDocModal(true)}>
             <Text style={styles.addRecordButtonText}>+ Tambah Dokumen</Text>
           </TouchableOpacity>
@@ -1582,61 +1404,12 @@ function PetDetail({ pet, onEdit }: PetDetailProps) {
       )}
 
       {/* ── Modals ── */}
-      {user && (
-        <AddShowRecordModal
-          visible={showModal}
-          petId={pet.id}
-          userId={user.id}
-          onClose={() => setShowModal(false)}
-          onSuccess={() => { setShowModal(false); fetchShowRecords(); fetchStats(); }}
-        />
-      )}
-      {user && (
-        <AddEggBatchModal
-          visible={eggModal}
-          petId={pet.id}
-          userId={user.id}
-          nextBatchNumber={nextBatchNumber}
-          onClose={() => setEggModal(false)}
-          onSuccess={() => { setEggModal(false); fetchEggBatches(); }}
-        />
-      )}
-      {user && (
-        <AddHealthRecordModal
-          visible={healthModal}
-          petId={pet.id}
-          userId={user.id}
-          onClose={() => setHealthModal(false)}
-          onSuccess={() => { setHealthModal(false); fetchHealthRecords(); fetchStats(); }}
-        />
-      )}
-      {user && (
-        <AddPetExpenseModal
-          visible={expenseModal}
-          petId={pet.id}
-          userId={user.id}
-          onClose={() => setExpenseModal(false)}
-          onSuccess={() => { setExpenseModal(false); fetchPetExpenses(); fetchStats(); }}
-        />
-      )}
-      {user && (
-        <AddDocumentModal
-          visible={docModal}
-          petId={pet.id}
-          userId={user.id}
-          onClose={() => setDocModal(false)}
-          onSuccess={() => { setDocModal(false); fetchDocuments(); }}
-        />
-      )}
-      {user && (
-        <AddPhotoModal
-          visible={photoModal}
-          petId={pet.id}
-          userId={user.id}
-          onClose={() => setPhotoModal(false)}
-          onSuccess={() => { setPhotoModal(false); fetchPhotos(); }}
-        />
-      )}
+      {user && <AddShowRecordModal visible={showModal} petId={pet.id} userId={user.id} onClose={() => setShowModal(false)} onSuccess={() => { setShowModal(false); fetchShowRecords(); fetchStats(); }} />}
+      {user && <AddEggBatchModal visible={eggModal} petId={pet.id} userId={user.id} nextBatchNumber={nextBatchNumber} onClose={() => setEggModal(false)} onSuccess={() => { setEggModal(false); fetchEggBatches(); }} />}
+      {user && <AddHealthRecordModal visible={healthModal} petId={pet.id} userId={user.id} onClose={() => setHealthModal(false)} onSuccess={() => { setHealthModal(false); fetchHealthRecords(); fetchStats(); }} />}
+      {user && <AddPetExpenseModal visible={expenseModal} petId={pet.id} userId={user.id} onClose={() => setExpenseModal(false)} onSuccess={() => { setExpenseModal(false); fetchPetExpenses(); fetchStats(); }} />}
+      {user && <AddDocumentModal visible={docModal} petId={pet.id} userId={user.id} onClose={() => setDocModal(false)} onSuccess={() => { setDocModal(false); fetchDocuments(); }} />}
+      {user && <AddPhotoModal visible={photoModal} petId={pet.id} userId={user.id} onClose={() => setPhotoModal(false)} onSuccess={() => { setPhotoModal(false); fetchPhotos(); }} />}
     </View>
   );
 }
@@ -1648,24 +1421,20 @@ export default function PetsScreen() {
   const [loading, setLoading] = useState(true);
   const [selectedPet, setSelectedPet] = useState<Pet | null>(null);
   const [showAddModal, setShowAddModal] = useState(false);
+  const [editingPet, setEditingPet] = useState<Pet | null>(null);
+  const [showEditModal, setShowEditModal] = useState(false);
 
   const fetchPets = useCallback(async () => {
     if (!user) return;
     setLoading(true);
     try {
       const { data, error } = await supabase
-        .from('pets')
-        .select('*')
-        .eq('user_id', user.id)
-        .is('deleted_at', null)
-        .order('name', { ascending: true });
+        .from('pets').select('*').eq('user_id', user.id)
+        .is('deleted_at', null).order('name', { ascending: true });
       if (error) throw error;
       setPets(data ?? []);
-    } catch {
-      setPets([]);
-    } finally {
-      setLoading(false);
-    }
+    } catch { setPets([]); }
+    finally { setLoading(false); }
   }, [user]);
 
   useEffect(() => { fetchPets(); }, [fetchPets]);
@@ -1676,14 +1445,17 @@ export default function PetsScreen() {
     setShowAddModal(false);
   };
 
-  const [editingPet, setEditingPet] = useState<Pet | null>(null);
-  const [showEditModal, setShowEditModal] = useState(false);
-
   const handleEditSuccess = (updated: Pet) => {
     setPets((prev) => prev.map((p) => (p.id === updated.id ? updated : p)).sort((a, b) => a.name.localeCompare(b.name)));
     setSelectedPet(updated);
     setShowEditModal(false);
     setEditingPet(null);
+  };
+
+  // Called when avatar is updated in PetDetail — syncs state without full refetch
+  const handleAvatarUpdate = (updated: Pet) => {
+    setPets((prev) => prev.map((p) => (p.id === updated.id ? updated : p)));
+    setSelectedPet(updated);
   };
 
   const handleDeletePet = (pet: Pet) => {
@@ -1709,17 +1481,16 @@ export default function PetsScreen() {
     );
   };
 
-
   return (
     <View style={styles.safeArea}>
       {/* Header */}
       <SafeAreaView edges={['top']} style={{ backgroundColor: PRIMARY }}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>Pets Saya</Text>
-        <TouchableOpacity style={styles.headerAddBtn} onPress={() => setShowAddModal(true)}>
-          <Text style={styles.headerAddBtnText}>+</Text>
-        </TouchableOpacity>
-      </View>
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>Pets Saya</Text>
+          <TouchableOpacity style={styles.headerAddBtn} onPress={() => setShowAddModal(true)}>
+            <Text style={styles.headerAddBtnText}>+</Text>
+          </TouchableOpacity>
+        </View>
       </SafeAreaView>
 
       <ScrollView
@@ -1728,10 +1499,11 @@ export default function PetsScreen() {
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
       >
+        {/* ── Pet chip selector ── */}
         {loading ? (
-          <View style={styles.petGrid}>
-            {[0, 1, 2, 3].map((i) => <SkeletonCard key={i} />)}
-          </View>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipRow}>
+            {[0, 1, 2].map((i) => <SkeletonChip key={i} />)}
+          </ScrollView>
         ) : pets.length === 0 ? (
           <View style={styles.emptyState}>
             <Ionicons name="paw-outline" size={60} color="#D1C9B8" />
@@ -1740,56 +1512,34 @@ export default function PetsScreen() {
           </View>
         ) : (
           <>
-            <View style={styles.petGrid}>
-              {pets.map((pet) => {
-                const isSelected = selectedPet?.id === pet.id;
-                const emoji = SPECIES_EMOJI[pet.species] ?? '🐾';
-                return (
-                  <TouchableOpacity
-                    key={pet.id}
-                    style={[styles.petCard, isSelected && styles.petCardSelected]}
-                    onPress={() => setSelectedPet(isSelected ? null : pet)}
-                    onLongPress={() => handleDeletePet(pet)}
-                    activeOpacity={0.85}
-                  >
-                    <View style={styles.petCardEmoji}>
-                      <Text style={styles.petCardEmojiText}>{emoji}</Text>
-                    </View>
-                    <Text style={styles.petCardName} numberOfLines={1}>{pet.name}</Text>
-                    <Text style={styles.petCardBreed} numberOfLines={1}>
-                      {pet.breed || pet.species}
-                    </Text>
-                    <View style={[styles.petCardBadge, { backgroundColor: getHealthBadgeColor(pet.health_status) }]}>
-                      <Text style={styles.petCardBadgeText}>{pet.health_status}</Text>
-                    </View>
-                    {pet.species === 'Ayam Serama' && !!pet.posture_class && (
-                      <View style={[styles.petCardBadge, { backgroundColor: ACCENT, marginTop: 3 }]}>
-                        <Text style={styles.petCardBadgeText}>{pet.posture_class}</Text>
-                      </View>
-                    )}
-                    {pet.species === 'Ayam Serama' && !!pet.feather_colour && (
-                      <View style={[styles.petCardBadge, { backgroundColor: PRIMARY, marginTop: 3 }]}>
-                        <Text style={styles.petCardBadgeText}>{pet.feather_colour}</Text>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                );
-              })}
-
-              <TouchableOpacity
-                style={styles.addPetCard}
-                onPress={() => setShowAddModal(true)}
-                activeOpacity={0.8}
-              >
-                <Text style={styles.addPetCardIcon}>+</Text>
-                <Text style={styles.addPetCardText}>Tambah Pet</Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.chipRow}
+            >
+              {pets.map((pet) => (
+                <PetChip
+                  key={pet.id}
+                  pet={pet}
+                  selected={selectedPet?.id === pet.id}
+                  onPress={() => setSelectedPet(selectedPet?.id === pet.id ? null : pet)}
+                  onLongPress={() => handleDeletePet(pet)}
+                />
+              ))}
+              {/* Add pet chip */}
+              <TouchableOpacity style={styles.chipAdd} onPress={() => setShowAddModal(true)} activeOpacity={0.8}>
+                <View style={styles.chipAddCircle}>
+                  <Text style={styles.chipAddIcon}>+</Text>
+                </View>
+                <Text style={styles.chipAddText}>Tambah</Text>
               </TouchableOpacity>
-            </View>
+            </ScrollView>
 
             {selectedPet && (
               <PetDetail
                 pet={selectedPet}
                 onEdit={() => { setEditingPet(selectedPet); setShowEditModal(true); }}
+                onAvatarUpdate={handleAvatarUpdate}
               />
             )}
           </>
@@ -1797,12 +1547,7 @@ export default function PetsScreen() {
       </ScrollView>
 
       {user && (
-        <AddPetModal
-          visible={showAddModal}
-          onClose={() => setShowAddModal(false)}
-          onSuccess={handleAddSuccess}
-          userId={user.id}
-        />
+        <AddPetModal visible={showAddModal} onClose={() => setShowAddModal(false)} onSuccess={handleAddSuccess} userId={user.id} />
       )}
       <EditPetModal
         visible={showEditModal}
@@ -1819,61 +1564,41 @@ const styles = StyleSheet.create({
   // ── Layout
   safeArea: { flex: 1, backgroundColor: PRIMARY },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 56,
-    backgroundColor: PRIMARY,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingHorizontal: 20, paddingTop: 16, paddingBottom: 56, backgroundColor: PRIMARY,
   },
   headerTitle: { fontSize: 22, fontWeight: '700', color: '#FFFFFF' },
-  headerAddBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center',
-  },
+  headerAddBtn: { width: 36, height: 36, borderRadius: 18, backgroundColor: ACCENT, alignItems: 'center', justifyContent: 'center' },
   headerAddBtnText: { fontSize: 22, fontWeight: '700', color: '#FFFFFF', lineHeight: 28 },
-  scrollView: {
-    flex: 1, backgroundColor: '#FFFFFF',
-    borderTopLeftRadius: 28, borderTopRightRadius: 28, marginTop: -28,
-  },
-  scrollContent: { paddingTop: 16, paddingBottom: 40 },
+  scrollView: { flex: 1, backgroundColor: '#FFFFFF', borderTopLeftRadius: 28, borderTopRightRadius: 28, marginTop: -28 },
+  scrollContent: { paddingTop: 20, paddingBottom: 40 },
 
-  // ── Pet grid
-  petGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, paddingHorizontal: 16 },
+  // ── Chip row (horizontal pet selector)
+  chipRow: { paddingHorizontal: 16, paddingBottom: 16, gap: 16, alignItems: 'flex-start' },
 
-  // ── Pet card
-  petCard: {
-    width: CARD_WIDTH, minHeight: 160, backgroundColor: '#FFFFFF', borderRadius: 16, padding: 14,
-    shadowColor: '#000', shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08, shadowRadius: 8, elevation: 3,
-    borderWidth: 2, borderColor: 'transparent',
+  // ── Pet chip
+  chip: { alignItems: 'center', gap: 6, width: 64 },
+  chipAvatar: {
+    width: 56, height: 56, borderRadius: 28,
+    backgroundColor: INDIGO_LIGHT, borderWidth: 2, borderColor: 'transparent',
+    alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
   },
-  petCardSelected: { borderColor: ACCENT },
-  petCardEmoji: {
-    width: 38, height: 38, borderRadius: 19,
-    backgroundColor: SAGE, alignItems: 'center', justifyContent: 'center', marginBottom: 8,
-  },
-  petCardEmojiText: { fontSize: 20 },
-  petCardName: { fontSize: 15, fontWeight: '700', color: INK, marginBottom: 2 },
-  petCardBreed: { fontSize: 12, color: MUTED, flex: 1 },
-  petCardBadge: {
-    alignSelf: 'flex-end', borderRadius: 8,
-    paddingVertical: 3, paddingHorizontal: 8, marginTop: 4,
-  },
-  petCardBadgeText: { fontSize: 10, fontWeight: '600', color: '#FFFFFF' },
+  chipAvatarSelected: { borderColor: ACCENT, borderWidth: 2.5 },
+  chipAvatarImage: { width: '100%', height: '100%', borderRadius: 28 },
+  chipEmoji: { fontSize: 26 },
+  chipName: { fontSize: 11, color: MUTED, fontWeight: '500', textAlign: 'center' },
+  chipNameSelected: { color: PRIMARY, fontWeight: '700' },
+  chipDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: ACCENT, marginTop: -2 },
 
-  // ── Add pet card
-  addPetCard: {
-    width: CARD_WIDTH, height: 160, borderRadius: 16,
+  // ── Add chip
+  chipAdd: { alignItems: 'center', gap: 6, width: 64 },
+  chipAddCircle: {
+    width: 56, height: 56, borderRadius: 28,
     borderWidth: 2, borderStyle: 'dashed', borderColor: PRIMARY,
-    alignItems: 'center', justifyContent: 'center', gap: 8,
+    alignItems: 'center', justifyContent: 'center',
   },
-  addPetCardIcon: { fontSize: 32, fontWeight: '300', color: PRIMARY },
-  addPetCardText: { fontSize: 13, fontWeight: '600', color: PRIMARY },
-
-  // ── Skeleton
-  skeletonCard: { height: 160, backgroundColor: '#E0E0E0', borderRadius: 16 },
+  chipAddIcon: { fontSize: 26, color: PRIMARY, lineHeight: 30 },
+  chipAddText: { fontSize: 11, color: PRIMARY, fontWeight: '600', textAlign: 'center' },
 
   // ── Empty state
   emptyState: { alignItems: 'center', justifyContent: 'center', paddingVertical: 80, gap: 12 },
@@ -1883,16 +1608,33 @@ const styles = StyleSheet.create({
   // ── Pet detail card
   detailCard: {
     backgroundColor: '#FFFFFF', borderRadius: 20,
-    marginHorizontal: 16, marginTop: 8, marginBottom: 0, padding: 20,
+    marginHorizontal: 16, marginTop: 4, marginBottom: 0, padding: 20,
     shadowColor: '#000', shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.1, shadowRadius: 12, elevation: 5,
   },
   detailTopRow: { flexDirection: 'row', alignItems: 'center', gap: 14, marginBottom: 14 },
+
+  // Avatar with upload badge
   detailAvatar: {
     width: 58, height: 58, borderRadius: 29, backgroundColor: SAGE,
     borderWidth: 3, borderColor: ACCENT, alignItems: 'center', justifyContent: 'center',
+    overflow: 'hidden',
   },
+  detailAvatarImage: { width: '100%', height: '100%', borderRadius: 29 },
   detailAvatarEmoji: { fontSize: 28 },
+  avatarLoadingOverlay: {
+    position: 'absolute', top: 0, left: 0, right: 0, bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)', alignItems: 'center', justifyContent: 'center', borderRadius: 29,
+  },
+  avatarEditBadge: {
+    position: 'absolute',
+    bottom: 0, right: -4,
+    width: 20, height: 20, borderRadius: 10,
+    backgroundColor: PRIMARY,
+    borderWidth: 2, borderColor: '#FFFFFF',
+    alignItems: 'center', justifyContent: 'center',
+  },
+
   detailInfo: { flex: 1, gap: 2 },
   detailName: { fontSize: 18, fontWeight: '700', color: INK },
   detailBreed: { fontSize: 13, color: MUTED },
@@ -1905,19 +1647,13 @@ const styles = StyleSheet.create({
 
   // ── Stats row
   statsRow: { flexDirection: 'row', gap: 10, marginBottom: 16 },
-  statBox: {
-    flex: 1, backgroundColor: INDIGO_LIGHT, borderRadius: 12,
-    padding: 10, alignItems: 'center', gap: 4,
-  },
+  statBox: { flex: 1, backgroundColor: INDIGO_LIGHT, borderRadius: 12, padding: 10, alignItems: 'center', gap: 4 },
   statLabel: { fontSize: 10, color: MUTED, textAlign: 'center' },
   statValue: { fontSize: 14, fontWeight: '700', color: PRIMARY },
 
   // ── Tab grid
   tabGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
-  tabButton: {
-    width: '48%', backgroundColor: '#FFFFFF', borderRadius: 12,
-    padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0',
-  },
+  tabButton: { width: '48%', backgroundColor: '#FFFFFF', borderRadius: 12, padding: 10, alignItems: 'center', borderWidth: 1, borderColor: '#E0E0E0' },
   tabButtonActive: { backgroundColor: PRIMARY, borderColor: PRIMARY },
   tabText: { fontSize: 12, fontWeight: '600', color: MUTED },
   tabTextActive: { color: '#FFFFFF' },
@@ -1934,10 +1670,7 @@ const styles = StyleSheet.create({
   photoPreview: { width: '100%', height: '100%' },
 
   // ── Health record item
-  recordItem: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: BACKGROUND, borderRadius: 12, overflow: 'hidden', gap: 10,
-  },
+  recordItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: BACKGROUND, borderRadius: 12, overflow: 'hidden', gap: 10 },
   recordBar: { width: 4, alignSelf: 'stretch' },
   recordBody: { flex: 1, paddingVertical: 10, gap: 2 },
   recordTitle: { fontSize: 14, fontWeight: '600', color: INK },
@@ -1946,108 +1679,56 @@ const styles = StyleSheet.create({
   recordStatusText: { fontSize: 10, fontWeight: '600', color: '#FFFFFF' },
 
   // ── Add record button
-  addRecordButton: {
-    backgroundColor: PRIMARY, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 6,
-  },
+  addRecordButton: { backgroundColor: PRIMARY, borderRadius: 12, padding: 14, alignItems: 'center', marginTop: 6 },
   addRecordButtonText: { fontSize: 15, fontWeight: '700', color: '#FFFFFF' },
 
   // ── Show record item
-  showItem: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    backgroundColor: BACKGROUND, borderRadius: 12, padding: 12,
-  },
+  showItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: BACKGROUND, borderRadius: 12, padding: 12 },
   showItemLeft: { flex: 1, gap: 3 },
   showItemName: { fontSize: 14, fontWeight: '600', color: INK },
   showItemMeta: { fontSize: 12, color: MUTED },
-  awardBadge: {
-    flexDirection: 'row', alignItems: 'center',
-    backgroundColor: '#FFF8E1', borderRadius: 8,
-    paddingVertical: 4, paddingHorizontal: 8, marginLeft: 8,
-  },
+  awardBadge: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFF8E1', borderRadius: 8, paddingVertical: 4, paddingHorizontal: 8, marginLeft: 8 },
   awardBadgeText: { fontSize: 11, fontWeight: '700', color: '#B8860B' },
 
-  // ── Egg batch card
+  // ── Egg batch
   eggSummaryRow: { flexDirection: 'row', gap: 10, marginBottom: 4 },
-  eggSummaryBox: {
-    flex: 1, backgroundColor: INDIGO_LIGHT, borderRadius: 12,
-    padding: 12, alignItems: 'center', gap: 4,
-  },
+  eggSummaryBox: { flex: 1, backgroundColor: INDIGO_LIGHT, borderRadius: 12, padding: 12, alignItems: 'center', gap: 4 },
   eggSummaryValue: { fontSize: 22, fontWeight: '800', color: PRIMARY },
   eggSummaryLabel: { fontSize: 11, color: MUTED, textAlign: 'center' },
-  eggBatchCard: {
-    backgroundColor: BACKGROUND, borderRadius: 12, padding: 12, gap: 8,
-  },
-  eggBatchHeader: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-  },
+  eggBatchCard: { backgroundColor: BACKGROUND, borderRadius: 12, padding: 12, gap: 8 },
+  eggBatchHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   eggBatchTitle: { fontSize: 14, fontWeight: '700', color: INK, flex: 1 },
   eggBatchMeta: { fontSize: 11, color: MUTED },
   eggBatchNotes: { fontSize: 12, color: MUTED, fontStyle: 'italic' },
-  progressTrack: {
-    height: 6, backgroundColor: '#E0E0E0', borderRadius: 3, overflow: 'hidden',
-  },
+  progressTrack: { height: 6, backgroundColor: '#E0E0E0', borderRadius: 3, overflow: 'hidden' },
   progressFill: { height: '100%', backgroundColor: SAGE, borderRadius: 3 },
-  eggProgressBadge: {
-    borderRadius: 8, paddingVertical: 3, paddingHorizontal: 8, marginLeft: 6,
-  },
+  eggProgressBadge: { borderRadius: 8, paddingVertical: 3, paddingHorizontal: 8, marginLeft: 6 },
   eggProgressBadgeText: { fontSize: 11, fontWeight: '700' },
-  hatchedBadge: {
-    backgroundColor: '#E8F5E9', borderRadius: 8, paddingVertical: 3, paddingHorizontal: 8, marginLeft: 6,
-  },
+  hatchedBadge: { backgroundColor: '#E8F5E9', borderRadius: 8, paddingVertical: 3, paddingHorizontal: 8, marginLeft: 6 },
   hatchedBadgeText: { fontSize: 11, fontWeight: '700', color: '#2E7D32' },
 
   // ── Modal
-  modalOverlay: {
-    flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end',
-  },
-  modalSheet: {
-    backgroundColor: '#FFFFFF', borderTopLeftRadius: 24,
-    borderTopRightRadius: 24, padding: 24, maxHeight: '90%',
-  },
-  modalHandle: {
-    width: 40, height: 4, backgroundColor: '#D1C9B8',
-    borderRadius: 2, alignSelf: 'center', marginBottom: 20,
-  },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
+  modalSheet: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, maxHeight: '90%' },
+  modalHandle: { width: 40, height: 4, backgroundColor: '#D1C9B8', borderRadius: 2, alignSelf: 'center', marginBottom: 20 },
   modalTitle: { fontSize: 20, fontWeight: '700', color: PRIMARY, marginBottom: 20 },
 
   // ── Form fields
   fieldLabel: { fontSize: 13, fontWeight: '600', color: INK, marginBottom: 6, marginTop: 12 },
-  textInput: {
-    borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: INK, backgroundColor: BACKGROUND,
-  },
-
-  // ── Species / option pills
+  textInput: { borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, fontSize: 15, color: INK, backgroundColor: BACKGROUND },
   pillGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  pillButton: {
-    paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20,
-    borderWidth: 1, borderColor: '#E0E0E0', backgroundColor: '#FFFFFF',
-  },
+  pillButton: { paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, borderColor: '#E0E0E0', backgroundColor: '#FFFFFF' },
   pillButtonActive: { backgroundColor: PRIMARY, borderColor: PRIMARY },
   pillText: { fontSize: 13, color: MUTED, fontWeight: '500' },
   pillTextActive: { color: '#FFFFFF' },
-
-  // ── Date button
-  dateButton: {
-    flexDirection: 'row', alignItems: 'center', gap: 8,
-    borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12,
-    paddingHorizontal: 14, paddingVertical: 12, backgroundColor: BACKGROUND,
-  },
+  dateButton: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12, backgroundColor: BACKGROUND },
   dateButtonText: { fontSize: 15, color: INK },
-
-  // ── Gender toggle
-  genderToggle: {
-    flexDirection: 'row', backgroundColor: '#F0F0F0', borderRadius: 12, padding: 4, gap: 4,
-  },
+  genderToggle: { flexDirection: 'row', backgroundColor: '#F0F0F0', borderRadius: 12, padding: 4, gap: 4 },
   genderButton: { flex: 1, paddingVertical: 10, borderRadius: 10, alignItems: 'center' },
   genderButtonActive: { backgroundColor: PRIMARY },
   genderText: { fontSize: 14, fontWeight: '600', color: MUTED },
   genderTextActive: { color: '#FFFFFF' },
-
-  // ── Save / Cancel
-  saveButton: {
-    backgroundColor: PRIMARY, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 24,
-  },
+  saveButton: { backgroundColor: PRIMARY, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 24 },
   saveButtonDisabled: { opacity: 0.6 },
   saveButtonText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
   cancelButton: { padding: 14, alignItems: 'center', marginTop: 4, marginBottom: 8 },

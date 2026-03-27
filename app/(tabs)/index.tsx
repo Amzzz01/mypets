@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,8 @@ import {
   StyleSheet,
   Animated,
   Dimensions,
+  RefreshControl,
+  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -16,7 +18,7 @@ import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../lib/supabase';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const CARD_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2; // 2 cols, 24px side padding, 12px gap
+const CARD_WIDTH = (SCREEN_WIDTH - 48 - 12) / 2;
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -30,7 +32,7 @@ interface Reminder {
   title: string;
   time?: string;
   repeat?: string;
-  status?: string;
+  is_done?: boolean;
 }
 
 interface Stats {
@@ -42,7 +44,15 @@ interface Stats {
 
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
 
-function SkeletonBox({ width, height, style }: { width?: number | string; height: number; style?: object }) {
+function SkeletonBox({
+  width,
+  height,
+  style,
+}: {
+  width?: number | string;
+  height: number;
+  style?: object;
+}) {
   const opacity = useRef(new Animated.Value(0.3)).current;
   useEffect(() => {
     Animated.loop(
@@ -54,7 +64,10 @@ function SkeletonBox({ width, height, style }: { width?: number | string; height
   }, []);
   return (
     <Animated.View
-      style={[{ width: width ?? '100%', height, borderRadius: 8, backgroundColor: '#D1C9B8', opacity }, style]}
+      style={[
+        { width: width ?? '100%', height, borderRadius: 8, backgroundColor: '#D1C9B8', opacity },
+        style,
+      ]}
     />
   );
 }
@@ -62,21 +75,16 @@ function SkeletonBox({ width, height, style }: { width?: number | string; height
 function DashboardSkeleton() {
   return (
     <View style={sk.container}>
-      {/* Pets row */}
       <SkeletonBox height={14} width={120} style={{ marginBottom: 16 }} />
       <View style={sk.row}>
         {[0, 1, 2].map((i) => (
           <SkeletonBox key={i} width={72} height={88} style={{ marginRight: 12, borderRadius: 16 }} />
         ))}
       </View>
-
-      {/* Reminders */}
       <SkeletonBox height={14} width={160} style={{ marginTop: 28, marginBottom: 14 }} />
       {[0, 1].map((i) => (
         <SkeletonBox key={i} height={72} style={{ marginBottom: 10, borderRadius: 14 }} />
       ))}
-
-      {/* Stats */}
       <SkeletonBox height={14} width={100} style={{ marginTop: 28, marginBottom: 14 }} />
       <View style={sk.grid}>
         {[0, 1, 2, 3].map((i) => (
@@ -111,74 +119,24 @@ function getInitials(name: string): string {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-function PetChip({ name }: { name: string }) {
-  const initial = name[0]?.toUpperCase() ?? '?';
+// FIX 1: PetChip is now tappable — navigates to Pets tab
+function PetChip({ name, onPress }: { name: string; onPress: () => void }) {
   return (
-    <View style={chip.container}>
+    <TouchableOpacity style={chip.container} onPress={onPress} activeOpacity={0.75}>
       <View style={chip.avatar}>
         <Ionicons name="paw" size={22} color="#FFFFFF" />
       </View>
-      <Text style={chip.name} numberOfLines={1}>{name}</Text>
-    </View>
-  );
-}
-
-// ─── Quick Action Card ────────────────────────────────────────────────────────
-
-function QuickActionCard({
-  icon,
-  label,
-  accent,
-  onPress,
-}: {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  label: string;
-  accent: string;
-  onPress: () => void;
-}) {
-  return (
-    <TouchableOpacity style={[qa.card, { borderColor: accent + '40' }]} onPress={onPress} activeOpacity={0.8}>
-      <View style={[qa.iconBox, { backgroundColor: accent + '22' }]}>
-        <Ionicons name={icon} size={22} color={accent} />
-      </View>
-      <Text style={[qa.label, { color: accent }]}>{label}</Text>
+      <Text style={chip.name} numberOfLines={1}>
+        {name}
+      </Text>
     </TouchableOpacity>
   );
 }
 
-const qa = StyleSheet.create({
-  card: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 14,
-    padding: 14,
-    marginRight: 12,
-    width: 88,
-    borderWidth: 1.5,
-    shadowColor: '#1A237E',
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 2,
-  },
-  iconBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 8,
-  },
-  label: {
-    fontSize: 11,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
-});
-
-function AddPetChip({ label }: { label: string }) {
+// FIX 2: AddPetChip now accepts and wires onPress
+function AddPetChip({ label, onPress }: { label: string; onPress: () => void }) {
   return (
-    <TouchableOpacity style={chip.addContainer}>
+    <TouchableOpacity style={chip.addContainer} onPress={onPress} activeOpacity={0.75}>
       <View style={chip.addCircle}>
         <Ionicons name="add" size={24} color="#1A237E" />
       </View>
@@ -232,25 +190,49 @@ const chip = StyleSheet.create({
   },
 });
 
-function ReminderCard({ reminder }: { reminder: Reminder }) {
+// FIX 3: ReminderCard now has a mark-done action
+function ReminderCard({
+  reminder,
+  onMarkDone,
+}: {
+  reminder: Reminder;
+  onMarkDone: (id: string) => void;
+}) {
   const { t } = useTranslation();
-  const isDone = reminder.status === 'done' || reminder.status === 'selesai';
+  const isDone = reminder.is_done === true;
   const statusLabel = isDone ? t('dashboard.done') : t('dashboard.active');
   const statusColor = isDone ? '#81C784' : '#FFB300';
 
   return (
     <View style={rc.card}>
       <View style={rc.iconBox}>
-        <Ionicons name="notifications-outline" size={20} color="#1A237E" />
+        <Ionicons
+          name={isDone ? 'checkmark-circle' : 'notifications-outline'}
+          size={20}
+          color={isDone ? '#81C784' : '#1A237E'}
+        />
       </View>
       <View style={rc.content}>
-        <Text style={rc.title} numberOfLines={1}>{reminder.title}</Text>
+        <Text style={[rc.title, isDone && rc.titleDone]} numberOfLines={1}>
+          {reminder.title}
+        </Text>
         <Text style={rc.sub} numberOfLines={1}>
           {[reminder.time, reminder.repeat].filter(Boolean).join(' · ') || '—'}
         </Text>
       </View>
-      <View style={[rc.badge, { backgroundColor: statusColor + '22' }]}>
-        <Text style={[rc.badgeText, { color: statusColor }]}>{statusLabel}</Text>
+      <View style={rc.right}>
+        <View style={[rc.badge, { backgroundColor: statusColor + '22' }]}>
+          <Text style={[rc.badgeText, { color: statusColor }]}>{statusLabel}</Text>
+        </View>
+        {!isDone && (
+          <TouchableOpacity
+            style={rc.doneBtn}
+            onPress={() => onMarkDone(reminder.id)}
+            activeOpacity={0.75}
+          >
+            <Ionicons name="checkmark" size={14} color="#fff" />
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -281,15 +263,83 @@ const rc = StyleSheet.create({
   },
   content: { flex: 1 },
   title: { fontSize: 14, fontWeight: '600', color: '#1A1A2E', marginBottom: 2 },
+  titleDone: { textDecorationLine: 'line-through', color: '#9E9E9E' },
   sub: { fontSize: 12, color: '#9E9E9E' },
+  right: { alignItems: 'flex-end', gap: 6 },
   badge: {
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 8,
-    marginLeft: 8,
   },
   badgeText: { fontSize: 11, fontWeight: '700' },
+  doneBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    backgroundColor: '#81C784',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
 });
+
+// ─── Quick Action Card ────────────────────────────────────────────────────────
+
+function QuickActionCard({
+  icon,
+  label,
+  accent,
+  onPress,
+}: {
+  icon: React.ComponentProps<typeof Ionicons>['name'];
+  label: string;
+  accent: string;
+  onPress: () => void;
+}) {
+  return (
+    <TouchableOpacity
+      style={[qa.card, { borderColor: accent + '40' }]}
+      onPress={onPress}
+      activeOpacity={0.8}
+    >
+      <View style={[qa.iconBox, { backgroundColor: accent + '22' }]}>
+        <Ionicons name={icon} size={22} color={accent} />
+      </View>
+      <Text style={[qa.label, { color: accent }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+const qa = StyleSheet.create({
+  card: {
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: 14,
+    padding: 14,
+    marginRight: 12,
+    width: 88,
+    borderWidth: 1.5,
+    shadowColor: '#1A237E',
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 2 },
+    elevation: 2,
+  },
+  iconBox: {
+    width: 44,
+    height: 44,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 8,
+  },
+  label: {
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+});
+
+// ─── Stat Card ────────────────────────────────────────────────────────────────
 
 function StatCard({
   icon,
@@ -352,13 +402,12 @@ export default function DashboardScreen() {
     activeLitters: 0,
   });
   const [loading, setLoading] = useState(true);
+  // FIX 7: pull-to-refresh state
+  const [refreshing, setRefreshing] = useState(false);
 
-  useEffect(() => {
-    if (user) fetchData();
-  }, [user]);
-
-  const fetchData = async () => {
+  const fetchData = useCallback(async () => {
     if (!user) return;
+
     const today = new Date().toISOString().split('T')[0];
     const now = new Date();
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1)
@@ -368,11 +417,37 @@ export default function DashboardScreen() {
     const [profileRes, petsRes, remindersRes, expensesRes, littersRes, upcomingRes] =
       await Promise.all([
         supabase.from('users').select('name').eq('id', user.id).maybeSingle(),
-        supabase.from('pets').select('id, name').eq('user_id', user.id),
-        supabase.from('reminders').select('id, title, time, repeat, is_done').eq('user_id', user.id).eq('date', today),
-        supabase.from('expenses').select('amount').eq('user_id', user.id).gte('date', startOfMonth),
+
+        // FIX 5: filter out soft-deleted pets
+        supabase
+          .from('pets')
+          .select('id, name')
+          .eq('user_id', user.id)
+          .is('deleted_at', null),
+
+        // FIX 4: filter out soft-deleted reminders
+        supabase
+          .from('reminders')
+          .select('id, title, time, repeat, is_done')
+          .eq('user_id', user.id)
+          .eq('date', today)
+          .is('deleted_at', null),
+
+        supabase
+          .from('expenses')
+          .select('amount')
+          .eq('user_id', user.id)
+          .gte('date', startOfMonth),
+
         supabase.from('litters').select('id').eq('user_id', user.id),
-        supabase.from('reminders').select('id').eq('user_id', user.id).gte('date', today),
+
+        // FIX 5 (upcomingCount): filter out soft-deleted reminders
+        supabase
+          .from('reminders')
+          .select('id')
+          .eq('user_id', user.id)
+          .gte('date', today)
+          .is('deleted_at', null),
       ]);
 
     setDisplayName(profileRes.data?.name ?? user.email ?? '');
@@ -384,6 +459,7 @@ export default function DashboardScreen() {
       0
     );
     setStats({
+      // FIX 5: totalPets count now excludes deleted pets
       totalPets: petsRes.data?.length ?? 0,
       monthlyExpenses,
       upcomingCount: upcomingRes.data?.length ?? 0,
@@ -391,10 +467,48 @@ export default function DashboardScreen() {
     });
 
     setLoading(false);
-  };
+    setRefreshing(false);
+  }, [user]);
+
+  useEffect(() => {
+    if (user) fetchData();
+  }, [user, fetchData]);
+
+  // FIX 7: pull-to-refresh handler
+  const handleRefresh = useCallback(() => {
+    setRefreshing(true);
+    fetchData();
+  }, [fetchData]);
+
+  // FIX 3: mark reminder done locally + in DB
+  const handleMarkDone = useCallback(
+    async (id: string) => {
+      // Optimistic update
+      setReminders((prev) =>
+        prev.map((r) => (r.id === id ? { ...r, is_done: true } : r))
+      );
+      try {
+        const { error } = await supabase
+          .from('reminders')
+          .update({ is_done: true })
+          .eq('id', id);
+        if (error) throw error;
+      } catch {
+        // Rollback on error
+        setReminders((prev) =>
+          prev.map((r) => (r.id === id ? { ...r, is_done: false } : r))
+        );
+        Alert.alert('Ralat', 'Gagal mengemaskini peringatan.');
+      }
+    },
+    []
+  );
 
   const roleLabel =
     role === 'Breeder' ? t('register.breeder') : role === 'Owner' ? t('register.owner') : null;
+
+  // FIX 6: notification badge shows real undone reminder count for today
+  const pendingRemindersCount = reminders.filter((r) => !r.is_done).length;
 
   return (
     <View style={styles.root}>
@@ -414,11 +528,13 @@ export default function DashboardScreen() {
               )}
               <View style={styles.pill}>
                 <Ionicons name="paw" size={10} color="#FFB300" style={{ marginRight: 4 }} />
+                {/* FIX 6: live pet count */}
                 <Text style={styles.pillText}>{stats.totalPets}</Text>
               </View>
               <View style={styles.pill}>
                 <Ionicons name="notifications" size={10} color="#FFB300" style={{ marginRight: 4 }} />
-                <Text style={styles.pillText}>{reminders.length}</Text>
+                {/* FIX 6: live pending reminder count */}
+                <Text style={styles.pillText}>{pendingRemindersCount}</Text>
               </View>
             </View>
           </View>
@@ -430,11 +546,20 @@ export default function DashboardScreen() {
         </View>
       </SafeAreaView>
 
-      {/* ── Parchment Body (overlaps header) ── */}
+      {/* ── Parchment Body ── */}
       <ScrollView
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
         showsVerticalScrollIndicator={false}
+        // FIX 7: pull-to-refresh
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={handleRefresh}
+            tintColor="#1A237E"
+            colors={['#1A237E']}
+          />
+        }
       >
         {loading ? (
           <DashboardSkeleton />
@@ -447,10 +572,19 @@ export default function DashboardScreen() {
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.petsRow}
             >
+              {/* FIX 1: each PetChip navigates to Pets tab */}
               {pets.map((pet) => (
-                <PetChip key={pet.id} name={pet.name} />
+                <PetChip
+                  key={pet.id}
+                  name={pet.name}
+                  onPress={() => router.push('/(tabs)/pets')}
+                />
               ))}
-              <AddPetChip label={t('dashboard.addPet')} />
+              {/* FIX 2: AddPetChip now navigates to Pets tab */}
+              <AddPetChip
+                label={t('dashboard.addPet')}
+                onPress={() => router.push('/(tabs)/pets')}
+              />
             </ScrollView>
 
             {/* Quick Actions Section */}
@@ -483,18 +617,25 @@ export default function DashboardScreen() {
             </ScrollView>
 
             {/* Reminders Section */}
-            <Text style={[styles.sectionTitle, { marginTop: 28 }]}>{t('dashboard.reminders')}</Text>
+            <Text style={[styles.sectionTitle, { marginTop: 28 }]}>
+              {t('dashboard.reminders')}
+            </Text>
             {reminders.length === 0 ? (
               <View style={styles.emptyBox}>
                 <Ionicons name="notifications-off-outline" size={28} color="#9E9E9E" />
                 <Text style={styles.emptyText}>{t('dashboard.noReminders')}</Text>
               </View>
             ) : (
-              reminders.map((r) => <ReminderCard key={r.id} reminder={r} />)
+              /* FIX 3: ReminderCard now accepts onMarkDone */
+              reminders.map((r) => (
+                <ReminderCard key={r.id} reminder={r} onMarkDone={handleMarkDone} />
+              ))
             )}
 
             {/* Summary Section */}
-            <Text style={[styles.sectionTitle, { marginTop: 28 }]}>{t('dashboard.summary')}</Text>
+            <Text style={[styles.sectionTitle, { marginTop: 28 }]}>
+              {t('dashboard.summary')}
+            </Text>
             <View style={styles.statGrid}>
               <StatCard
                 icon="paw"
@@ -595,8 +736,6 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     color: '#1A237E',
   },
-
-  // Body
   body: {
     flex: 1,
     backgroundColor: '#F9F7F2',
@@ -606,9 +745,8 @@ const styles = StyleSheet.create({
   },
   bodyContent: {
     paddingHorizontal: 24,
-    paddingTop: 28,
+    paddingTop: 44,
   },
-
   sectionTitle: {
     fontSize: 16,
     fontWeight: '700',

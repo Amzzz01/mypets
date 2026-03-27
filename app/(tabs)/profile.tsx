@@ -3,6 +3,7 @@ import {
   Alert,
   Platform,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -16,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
+import type { Role } from '../../store/authStore';
 
 // ─── Design Tokens ────────────────────────────────────────────────────────────
 const PRIMARY = '#1A237E';
@@ -94,12 +96,14 @@ function SettingsGroup({ title, children }: { title: string; children: React.Rea
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const { t, i18n } = useTranslation();
-  const { user, role } = useAuthStore();
+  const { user, role, updateRole } = useAuthStore();
 
   const [displayName, setDisplayName] = useState('');
   const [location, setLocation] = useState('');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -121,8 +125,12 @@ export default function ProfileScreen() {
   };
 
   const loadPreferences = async () => {
-    const notif = await AsyncStorage.getItem('notifications_enabled');
+    const [notif, savedTheme] = await Promise.all([
+      AsyncStorage.getItem('notifications_enabled'),
+      AsyncStorage.getItem('app_theme'),
+    ]);
     if (notif !== null) setNotificationsEnabled(notif === 'true');
+    if (savedTheme === 'dark' || savedTheme === 'light') setTheme(savedTheme);
   };
 
   const toggleNotifications = async (val: boolean) => {
@@ -133,6 +141,104 @@ export default function ProfileScreen() {
   const toggleLanguage = () => {
     const next = i18n.language === 'bm' ? 'en' : 'bm';
     i18n.changeLanguage(next);
+  };
+
+  const toggleTheme = async () => {
+    const next: 'light' | 'dark' = theme === 'light' ? 'dark' : 'light';
+    setTheme(next);
+    await AsyncStorage.setItem('app_theme', next);
+  };
+
+  const handleChangeRole = () => {
+    const newRole: Role = role === 'Breeder' ? 'Owner' : 'Breeder';
+    const newLabel = newRole === 'Breeder' ? 'Penternak' : 'Pemilik Haiwan';
+    Alert.alert(
+      'Tukar Jenis Akaun',
+      `Tukar kepada "${newLabel}"?\n\nIni akan mengubah ciri-ciri yang tersedia untuk anda.`,
+      [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Tukar',
+          onPress: async () => {
+            try {
+              await updateRole(newRole);
+            } catch {
+              Alert.alert('Ralat', 'Gagal menukar jenis akaun. Cuba lagi.');
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleExportData = async () => {
+    if (!user || exporting) return;
+    setExporting(true);
+    try {
+      const [{ data: pets }, { data: remindersData }, { data: expensesData }] = await Promise.all([
+        supabase.from('pets').select('name,species,breed,dob,gender,weight,health_status').eq('user_id', user.id).is('deleted_at', null),
+        supabase.from('reminders').select('title,date,time,type,repeat,is_done').eq('user_id', user.id).order('date', { ascending: false }),
+        supabase.from('expenses').select('category,amount,date,notes').eq('user_id', user.id).order('date', { ascending: false }),
+      ]);
+
+      const petIds: string[] = [];
+      const { data: petsWithId } = await supabase
+        .from('pets').select('id,name,species,breed,dob,gender,weight,health_status')
+        .eq('user_id', user.id).is('deleted_at', null);
+      (petsWithId ?? []).forEach((p: any) => petIds.push(p.id));
+
+      let healthData: any[] = [];
+      if (petIds.length > 0) {
+        const { data: h } = await supabase
+          .from('health_records').select('title,date,type,status,notes')
+          .in('pet_id', petIds).order('date', { ascending: false });
+        healthData = h ?? [];
+      }
+
+      const lines: string[] = [
+        `=== EKSPORT DATA MYPETS ===`,
+        `Tarikh Eksport: ${new Date().toLocaleDateString('ms-MY', { day: '2-digit', month: 'long', year: 'numeric' })}`,
+        `Pengguna: ${displayName}`,
+        '',
+      ];
+
+      lines.push('--- HAIWAN PELIHARAAN ---');
+      lines.push('Nama,Spesies,Baka,Tarikh Lahir,Jantina,Berat (kg),Status Kesihatan');
+      (petsWithId ?? []).forEach((p: any) => {
+        lines.push([p.name, p.species, p.breed || '', p.dob || '', p.gender, p.weight || '', p.health_status].join(','));
+      });
+
+      lines.push('');
+      lines.push('--- REKOD KESIHATAN ---');
+      lines.push('Tajuk,Tarikh,Jenis,Status,Nota');
+      healthData.forEach((h: any) => {
+        lines.push([h.title, h.date || '', h.type || '', h.status || '', (h.notes || '').replace(/,/g, ';')].join(','));
+      });
+
+      lines.push('');
+      lines.push('--- PERBELANJAAN ---');
+      lines.push('Kategori,Jumlah (RM),Tarikh,Nota');
+      (expensesData ?? []).forEach((e: any) => {
+        lines.push([e.category, e.amount, e.date || '', (e.notes || '').replace(/,/g, ';')].join(','));
+      });
+
+      lines.push('');
+      lines.push('--- PERINGATAN ---');
+      lines.push('Tajuk,Tarikh,Masa,Jenis,Ulang,Selesai');
+      (remindersData ?? []).forEach((r: any) => {
+        lines.push([r.title, r.date, r.time || '', r.type, r.repeat, r.is_done ? 'Ya' : 'Tidak'].join(','));
+      });
+
+      const csv = lines.join('\n');
+      await Share.share({
+        message: csv,
+        title: 'MyPets — Eksport Data',
+      });
+    } catch {
+      Alert.alert('Ralat', 'Gagal mengeksport data. Cuba lagi.');
+    } finally {
+      setExporting(false);
+    }
   };
 
   const handleLogout = () => {
@@ -151,6 +257,8 @@ export default function ProfileScreen() {
 
   const roleBadge = role === 'Breeder' ? 'Penternak' : 'Pemilik Haiwan';
   const langLabel = i18n.language === 'bm' ? 'BM / EN' : 'EN / BM';
+  const themeLabel = theme === 'light' ? 'Terang' : 'Gelap';
+  const themeIcon: React.ComponentProps<typeof Ionicons>['name'] = theme === 'light' ? 'sunny-outline' : 'moon-outline';
 
   return (
     <View style={s.root}>
@@ -201,7 +309,7 @@ export default function ProfileScreen() {
             iconBg="#7986CB"
             label="Jenis Akaun"
             value={roleBadge}
-            onPress={() => {}}
+            onPress={handleChangeRole}
           />
           <SettingsRow
             icon="star-outline"
@@ -239,11 +347,11 @@ export default function ProfileScreen() {
             onPress={toggleLanguage}
           />
           <SettingsRow
-            icon="sunny-outline"
+            icon={themeIcon}
             iconBg="#FFA726"
             label="Tema"
-            value="Terang"
-            onPress={() => {}}
+            value={themeLabel}
+            onPress={toggleTheme}
             isLast
           />
         </SettingsGroup>
@@ -253,8 +361,8 @@ export default function ProfileScreen() {
           <SettingsRow
             icon="download-outline"
             iconBg="#66BB6A"
-            label="Eksport Data"
-            onPress={() => Alert.alert('Eksport Data', 'Ciri ini akan datang.')}
+            label={exporting ? 'Mengeksport...' : 'Eksport Data'}
+            onPress={handleExportData}
           />
           <SettingsRow
             icon="log-out-outline"
