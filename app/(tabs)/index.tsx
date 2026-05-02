@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
+  Image,
   ScrollView,
   TouchableOpacity,
   StyleSheet,
@@ -9,10 +10,16 @@ import {
   Dimensions,
   RefreshControl,
   Alert,
+  Modal,
+  TextInput,
+  KeyboardAvoidingView,
+  Platform,
+  TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useTranslation } from 'react-i18next';
 import { useAuthStore } from '../../store/authStore';
 import { supabase } from '../../lib/supabase';
@@ -119,7 +126,6 @@ function getInitials(name: string): string {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
-// FIX 1: PetChip is now tappable — navigates to Pets tab
 function PetChip({ name, onPress }: { name: string; onPress: () => void }) {
   return (
     <TouchableOpacity style={chip.container} onPress={onPress} activeOpacity={0.75}>
@@ -133,7 +139,6 @@ function PetChip({ name, onPress }: { name: string; onPress: () => void }) {
   );
 }
 
-// FIX 2: AddPetChip now accepts and wires onPress
 function AddPetChip({ label, onPress }: { label: string; onPress: () => void }) {
   return (
     <TouchableOpacity style={chip.addContainer} onPress={onPress} activeOpacity={0.75}>
@@ -146,11 +151,7 @@ function AddPetChip({ label, onPress }: { label: string; onPress: () => void }) 
 }
 
 const chip = StyleSheet.create({
-  container: {
-    alignItems: 'center',
-    marginRight: 14,
-    width: 68,
-  },
+  container: { alignItems: 'center', marginRight: 14, width: 68 },
   avatar: {
     width: 56,
     height: 56,
@@ -160,17 +161,8 @@ const chip = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 6,
   },
-  name: {
-    fontSize: 11,
-    color: '#1A1A2E',
-    fontWeight: '600',
-    textAlign: 'center',
-  },
-  addContainer: {
-    alignItems: 'center',
-    marginRight: 14,
-    width: 68,
-  },
+  name: { fontSize: 11, color: '#1A1A2E', fontWeight: '600', textAlign: 'center' },
+  addContainer: { alignItems: 'center', marginRight: 14, width: 68 },
   addCircle: {
     width: 56,
     height: 56,
@@ -182,15 +174,9 @@ const chip = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 6,
   },
-  addName: {
-    fontSize: 11,
-    color: '#1A237E',
-    fontWeight: '600',
-    textAlign: 'center',
-  },
+  addName: { fontSize: 11, color: '#1A237E', fontWeight: '600', textAlign: 'center' },
 });
 
-// FIX 3: ReminderCard now has a mark-done action
 function ReminderCard({
   reminder,
   onMarkDone,
@@ -266,11 +252,7 @@ const rc = StyleSheet.create({
   titleDone: { textDecorationLine: 'line-through', color: '#9E9E9E' },
   sub: { fontSize: 12, color: '#9E9E9E' },
   right: { alignItems: 'flex-end', gap: 6 },
-  badge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 8,
-  },
+  badge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
   badgeText: { fontSize: 11, fontWeight: '700' },
   doneBtn: {
     width: 26,
@@ -281,8 +263,6 @@ const rc = StyleSheet.create({
     justifyContent: 'center',
   },
 });
-
-// ─── Quick Action Card ────────────────────────────────────────────────────────
 
 function QuickActionCard({
   icon,
@@ -332,14 +312,8 @@ const qa = StyleSheet.create({
     justifyContent: 'center',
     marginBottom: 8,
   },
-  label: {
-    fontSize: 11,
-    fontWeight: '700',
-    textAlign: 'center',
-  },
+  label: { fontSize: 11, fontWeight: '700', textAlign: 'center' },
 });
-
-// ─── Stat Card ────────────────────────────────────────────────────────────────
 
 function StatCard({
   icon,
@@ -390,9 +364,9 @@ const sc = StyleSheet.create({
 
 export default function DashboardScreen() {
   const { t } = useTranslation();
-  const { user, role } = useAuthStore();
+  const { user, role, profileName, fetchUserProfile, updateName } = useAuthStore();
 
-  const [displayName, setDisplayName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [pets, setPets] = useState<Pet[]>([]);
   const [reminders, setReminders] = useState<Reminder[]>([]);
   const [stats, setStats] = useState<Stats>({
@@ -402,8 +376,21 @@ export default function DashboardScreen() {
     activeLitters: 0,
   });
   const [loading, setLoading] = useState(true);
-  // FIX 7: pull-to-refresh state
   const [refreshing, setRefreshing] = useState(false);
+  const [showNameModal, setShowNameModal] = useState(false);
+  const [nameInput, setNameInput] = useState('');
+  const [savingName, setSavingName] = useState(false);
+
+  // One-time name check: fetch from store/DB once on mount, show modal only if still missing
+  useEffect(() => {
+    if (!user) return;
+    if (profileName) return; // already have name in store, skip
+    fetchUserProfile().then(() => {
+      // Check the updated store state
+      const { profileName: name } = useAuthStore.getState();
+      if (!name) setShowNameModal(true);
+    });
+  }, [user]);
 
   const fetchData = useCallback(async () => {
     if (!user) return;
@@ -416,32 +403,16 @@ export default function DashboardScreen() {
 
     const [profileRes, petsRes, remindersRes, expensesRes, littersRes, upcomingRes] =
       await Promise.all([
-        supabase.from('users').select('name').eq('id', user.id).maybeSingle(),
-
-        // FIX 5: filter out soft-deleted pets
-        supabase
-          .from('pets')
-          .select('id, name')
-          .eq('user_id', user.id)
-          .is('deleted_at', null),
-
-        // FIX 4: filter out soft-deleted reminders
+        supabase.from('users').select('avatar_url').eq('id', user.id).maybeSingle(),
+        supabase.from('pets').select('id, name').eq('user_id', user.id).is('deleted_at', null),
         supabase
           .from('reminders')
           .select('id, title, time, repeat, is_done')
           .eq('user_id', user.id)
           .eq('date', today)
           .is('deleted_at', null),
-
-        supabase
-          .from('expenses')
-          .select('amount')
-          .eq('user_id', user.id)
-          .gte('date', startOfMonth),
-
+        supabase.from('expenses').select('amount').eq('user_id', user.id).gte('date', startOfMonth),
         supabase.from('litters').select('id').eq('user_id', user.id),
-
-        // FIX 5 (upcomingCount): filter out soft-deleted reminders
         supabase
           .from('reminders')
           .select('id')
@@ -450,7 +421,7 @@ export default function DashboardScreen() {
           .is('deleted_at', null),
       ]);
 
-    setDisplayName(profileRes.data?.name ?? user.email ?? '');
+    setAvatarUrl(profileRes.data?.avatar_url ?? null);
     setPets(petsRes.data ?? []);
     setReminders(remindersRes.data ?? []);
 
@@ -459,7 +430,6 @@ export default function DashboardScreen() {
       0
     );
     setStats({
-      // FIX 5: totalPets count now excludes deleted pets
       totalPets: petsRes.data?.length ?? 0,
       monthlyExpenses,
       upcomingCount: upcomingRes.data?.length ?? 0,
@@ -470,44 +440,49 @@ export default function DashboardScreen() {
     setRefreshing(false);
   }, [user]);
 
-  useEffect(() => {
-    if (user) fetchData();
-  }, [user, fetchData]);
+  useFocusEffect(
+    useCallback(() => {
+      if (user) fetchData();
+    }, [user, fetchData])
+  );
 
-  // FIX 7: pull-to-refresh handler
   const handleRefresh = useCallback(() => {
     setRefreshing(true);
     fetchData();
   }, [fetchData]);
 
-  // FIX 3: mark reminder done locally + in DB
-  const handleMarkDone = useCallback(
-    async (id: string) => {
-      // Optimistic update
-      setReminders((prev) =>
-        prev.map((r) => (r.id === id ? { ...r, is_done: true } : r))
-      );
-      try {
-        const { error } = await supabase
-          .from('reminders')
-          .update({ is_done: true })
-          .eq('id', id);
-        if (error) throw error;
-      } catch {
-        // Rollback on error
-        setReminders((prev) =>
-          prev.map((r) => (r.id === id ? { ...r, is_done: false } : r))
-        );
-        Alert.alert('Ralat', 'Gagal mengemaskini peringatan.');
-      }
-    },
-    []
-  );
+  const handleMarkDone = useCallback(async (id: string) => {
+    setReminders((prev) => prev.map((r) => (r.id === id ? { ...r, is_done: true } : r)));
+    try {
+      const { error } = await supabase.from('reminders').update({ is_done: true }).eq('id', id);
+      if (error) throw error;
+    } catch {
+      setReminders((prev) => prev.map((r) => (r.id === id ? { ...r, is_done: false } : r)));
+      Alert.alert('Ralat', 'Gagal mengemaskini peringatan.');
+    }
+  }, []);
+
+  const handleSaveName = async () => {
+    const trimmed = nameInput.trim();
+    if (!trimmed) {
+      Alert.alert('Nama diperlukan', 'Sila masukkan nama anda.');
+      return;
+    }
+    if (!user) return;
+    setSavingName(true);
+    try {
+      await updateName(trimmed);  // saves to DB via upsert + updates store
+      setShowNameModal(false);
+      setNameInput('');
+    } catch {
+      Alert.alert('Ralat', 'Gagal menyimpan nama. Cuba lagi.');
+    } finally {
+      setSavingName(false);
+    }
+  };
 
   const roleLabel =
     role === 'Breeder' ? t('register.breeder') : role === 'Owner' ? t('register.owner') : null;
-
-  // FIX 6: notification badge shows real undone reminder count for today
   const pendingRemindersCount = reminders.filter((r) => !r.is_done).length;
 
   return (
@@ -518,7 +493,7 @@ export default function DashboardScreen() {
           <View style={styles.headerLeft}>
             <Text style={styles.greeting}>{t(getGreetingKey())},</Text>
             <Text style={styles.userName} numberOfLines={1}>
-              {displayName || '—'}
+              {profileName || '—'}
             </Text>
             <View style={styles.pillRow}>
               {roleLabel && (
@@ -528,21 +503,24 @@ export default function DashboardScreen() {
               )}
               <View style={styles.pill}>
                 <Ionicons name="paw" size={10} color="#FFB300" style={{ marginRight: 4 }} />
-                {/* FIX 6: live pet count */}
                 <Text style={styles.pillText}>{stats.totalPets}</Text>
               </View>
               <View style={styles.pill}>
                 <Ionicons name="notifications" size={10} color="#FFB300" style={{ marginRight: 4 }} />
-                {/* FIX 6: live pending reminder count */}
                 <Text style={styles.pillText}>{pendingRemindersCount}</Text>
               </View>
             </View>
           </View>
-
-          {/* Avatar */}
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials(displayName || 'U')}</Text>
-          </View>
+          {avatarUrl ? (
+            <Image
+              source={{ uri: avatarUrl }}
+              style={{ width: 52, height: 52, borderRadius: 26 }}
+            />
+          ) : (
+            <View style={styles.avatar}>
+              <Text style={styles.avatarText}>{getInitials(profileName || 'U')}</Text>
+            </View>
+          )}
         </View>
       </SafeAreaView>
 
@@ -551,7 +529,6 @@ export default function DashboardScreen() {
         style={styles.body}
         contentContainerStyle={styles.bodyContent}
         showsVerticalScrollIndicator={false}
-        // FIX 7: pull-to-refresh
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
@@ -565,29 +542,18 @@ export default function DashboardScreen() {
           <DashboardSkeleton />
         ) : (
           <>
-            {/* Pets Section */}
             <Text style={styles.sectionTitle}>{t('dashboard.pets')}</Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
               contentContainerStyle={styles.petsRow}
             >
-              {/* FIX 1: each PetChip navigates to Pets tab */}
               {pets.map((pet) => (
-                <PetChip
-                  key={pet.id}
-                  name={pet.name}
-                  onPress={() => router.push('/(tabs)/pets')}
-                />
+                <PetChip key={pet.id} name={pet.name} onPress={() => router.push('/(tabs)/pets')} />
               ))}
-              {/* FIX 2: AddPetChip now navigates to Pets tab */}
-              <AddPetChip
-                label={t('dashboard.addPet')}
-                onPress={() => router.push('/(tabs)/pets')}
-              />
+              <AddPetChip label={t('dashboard.addPet')} onPress={() => router.push('/(tabs)/pets')} />
             </ScrollView>
 
-            {/* Quick Actions Section */}
             <Text style={[styles.sectionTitle, { marginTop: 28 }]}>Tindakan Pantas</Text>
             <ScrollView
               horizontal
@@ -616,7 +582,6 @@ export default function DashboardScreen() {
               )}
             </ScrollView>
 
-            {/* Reminders Section */}
             <Text style={[styles.sectionTitle, { marginTop: 28 }]}>
               {t('dashboard.reminders')}
             </Text>
@@ -626,61 +591,110 @@ export default function DashboardScreen() {
                 <Text style={styles.emptyText}>{t('dashboard.noReminders')}</Text>
               </View>
             ) : (
-              /* FIX 3: ReminderCard now accepts onMarkDone */
               reminders.map((r) => (
                 <ReminderCard key={r.id} reminder={r} onMarkDone={handleMarkDone} />
               ))
             )}
 
-            {/* Summary Section */}
-            <Text style={[styles.sectionTitle, { marginTop: 28 }]}>
-              {t('dashboard.summary')}
-            </Text>
+            <Text style={[styles.sectionTitle, { marginTop: 28 }]}>{t('dashboard.summary')}</Text>
             <View style={styles.statGrid}>
-              <StatCard
-                icon="paw"
-                label={t('dashboard.totalPets')}
-                value={String(stats.totalPets)}
-                accent="#1A237E"
-              />
-              <StatCard
-                icon="cash-outline"
-                label={t('dashboard.monthlyExpenses')}
-                value={`RM ${stats.monthlyExpenses.toFixed(2)}`}
-                accent="#FFB300"
-              />
-              <StatCard
-                icon="calendar-outline"
-                label={t('dashboard.upcoming')}
-                value={String(stats.upcomingCount)}
-                accent="#81C784"
-              />
-              <StatCard
-                icon="heart-outline"
-                label={t('dashboard.activeLitters')}
-                value={String(stats.activeLitters)}
-                accent="#EF9A9A"
-              />
+              <StatCard icon="paw" label={t('dashboard.totalPets')} value={String(stats.totalPets)} accent="#1A237E" />
+              <StatCard icon="cash-outline" label={t('dashboard.monthlyExpenses')} value={`RM ${stats.monthlyExpenses.toFixed(2)}`} accent="#FFB300" />
+              <StatCard icon="calendar-outline" label={t('dashboard.upcoming')} value={String(stats.upcomingCount)} accent="#81C784" />
+              <StatCard icon="heart-outline" label={t('dashboard.activeLitters')} value={String(stats.activeLitters)} accent="#EF9A9A" />
             </View>
 
             <View style={{ height: 24 }} />
           </>
         )}
       </ScrollView>
+
+      {/* ── Name Prompt Modal ── */}
+      <Modal visible={showNameModal} transparent animationType="fade" onRequestClose={() => {}}>
+        <TouchableWithoutFeedback onPress={Keyboard.dismiss}>
+          <View style={nm.overlay}>
+            <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
+              <View style={nm.card}>
+                <View style={nm.iconBox}>
+                  <Ionicons name="person-circle-outline" size={48} color="#1A237E" />
+                </View>
+                <Text style={nm.title}>Selamat Datang!</Text>
+                <Text style={nm.subtitle}>
+                  Sila masukkan nama anda untuk mula menggunakan MyPets.
+                </Text>
+                <TextInput
+                  style={nm.input}
+                  placeholder="Nama anda"
+                  placeholderTextColor="#9E9E9E"
+                  value={nameInput}
+                  onChangeText={setNameInput}
+                  autoFocus
+                  returnKeyType="done"
+                  onSubmitEditing={handleSaveName}
+                />
+                <TouchableOpacity
+                  style={[nm.btn, savingName && { opacity: 0.7 }]}
+                  onPress={handleSaveName}
+                  disabled={savingName}
+                  activeOpacity={0.85}
+                >
+                  <Text style={nm.btnText}>{savingName ? 'Menyimpan...' : 'Teruskan'}</Text>
+                </TouchableOpacity>
+              </View>
+            </KeyboardAvoidingView>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </View>
   );
 }
 
+// ─── Name Modal Styles ────────────────────────────────────────────────────────
+
+const nm = StyleSheet.create({
+  overlay: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    padding: 24,
+  },
+  card: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 20,
+    padding: 28,
+    width: '100%',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  iconBox: { marginBottom: 12 },
+  title: { fontSize: 20, fontWeight: '800', color: '#1A237E', marginBottom: 8, textAlign: 'center' },
+  subtitle: { fontSize: 13, color: '#9E9E9E', textAlign: 'center', marginBottom: 20, lineHeight: 20 },
+  input: {
+    width: '100%',
+    backgroundColor: '#F9F7F2',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 13,
+    fontSize: 15,
+    color: '#1A1A2E',
+    borderWidth: 1,
+    borderColor: '#E8E4DC',
+    marginBottom: 16,
+  },
+  btn: { width: '100%', backgroundColor: '#1A237E', borderRadius: 12, paddingVertical: 14, alignItems: 'center' },
+  btnText: { color: '#FFFFFF', fontSize: 15, fontWeight: '700' },
+});
+
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  root: {
-    flex: 1,
-    backgroundColor: '#1A237E',
-  },
-  headerSafe: {
-    backgroundColor: '#1A237E',
-  },
+  root: { flex: 1, backgroundColor: '#1A237E' },
+  headerSafe: { backgroundColor: '#1A237E' },
   headerRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
@@ -689,27 +703,10 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
     paddingTop: 12,
   },
-  headerLeft: {
-    flex: 1,
-    marginRight: 16,
-  },
-  greeting: {
-    fontSize: 14,
-    color: '#AABAD4',
-    fontWeight: '500',
-    marginBottom: 2,
-  },
-  userName: {
-    fontSize: 22,
-    fontWeight: '800',
-    color: '#FFFFFF',
-    marginBottom: 10,
-  },
-  pillRow: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-  },
+  headerLeft: { flex: 1, marginRight: 16 },
+  greeting: { fontSize: 14, color: '#AABAD4', fontWeight: '500', marginBottom: 2 },
+  userName: { fontSize: 22, fontWeight: '800', color: '#FFFFFF', marginBottom: 10 },
+  pillRow: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
   pill: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -718,11 +715,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
-  pillText: {
-    color: '#FFB300',
-    fontSize: 11,
-    fontWeight: '700',
-  },
+  pillText: { color: '#FFB300', fontSize: 11, fontWeight: '700' },
   avatar: {
     width: 52,
     height: 52,
@@ -731,11 +724,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarText: {
-    fontSize: 18,
-    fontWeight: '800',
-    color: '#1A237E',
-  },
+  avatarText: { fontSize: 18, fontWeight: '800', color: '#1A237E' },
   body: {
     flex: 1,
     backgroundColor: '#F9F7F2',
@@ -743,19 +732,9 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 28,
     marginTop: -28,
   },
-  bodyContent: {
-    paddingHorizontal: 24,
-    paddingTop: 44,
-  },
-  sectionTitle: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: '#1A1A2E',
-    marginBottom: 14,
-  },
-  petsRow: {
-    paddingBottom: 4,
-  },
+  bodyContent: { paddingHorizontal: 24, paddingTop: 44 },
+  sectionTitle: { fontSize: 16, fontWeight: '700', color: '#1A1A2E', marginBottom: 14 },
+  petsRow: { paddingBottom: 4 },
   emptyBox: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -764,13 +743,6 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     gap: 8,
   },
-  emptyText: {
-    color: '#9E9E9E',
-    fontSize: 13,
-  },
-  statGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
+  emptyText: { color: '#9E9E9E', fontSize: 13 },
+  statGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
 });

@@ -42,8 +42,8 @@ export default function RegisterScreen() {
     }
     try {
       await register(name.trim(), email.trim(), password, role);
-    } catch {
-      Alert.alert(t('errors.registerFailed'));
+    } catch (error: any) {
+      Alert.alert(t('errors.registerFailed'), error?.message || 'Sila cuba lagi.');
     }
   };
 

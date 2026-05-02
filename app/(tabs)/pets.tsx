@@ -3,6 +3,7 @@ import {
   Alert,
   Animated,
   Dimensions,
+  FlatList,
   Image,
   Modal,
   Platform,
@@ -16,6 +17,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import DateTimePicker, { DateTimePickerEvent } from '@react-native-community/datetimepicker';
+import * as FileSystem from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
@@ -36,7 +38,7 @@ const { width: SCREEN_WIDTH } = Dimensions.get('window');
 type HealthStatus = 'Sihat' | 'Kurang Sihat' | 'Sakit';
 type Species = 'Anjing' | 'Kucing' | 'Arnab' | 'Burung' | 'Ikan' | 'Ayam Serama' | 'Lain-lain';
 type Gender = 'Jantan' | 'Betina';
-type TabKey = 'Kesihatan' | 'Pertandingan' | 'Telur' | 'Perbelanjaan' | 'Galeri' | 'Dokumen';
+type TabKey = 'Kesihatan' | 'Pertandingan' | 'Telur' | 'Perbelanjaan' | 'Galeri' | 'Dokumen' | 'Susur Galur';
 
 interface Pet {
   id: string;
@@ -51,6 +53,10 @@ interface Pet {
   feather_colour?: string;
   posture_class?: string;
   avatar_url?: string;
+  sire_id?: string | null;
+  dam_id?: string | null;
+  purchase_date?: string | null;
+  origin?: 'Dilahirkan' | 'Dibeli';
 }
 
 interface HealthRecord {
@@ -257,10 +263,28 @@ function AddPetModal({ visible, onClose, onSuccess, userId }: AddPetModalProps) 
   const [postureClass, setPostureClass] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // New fields
+  const [origin, setOrigin] = useState<'Dilahirkan' | 'Dibeli'>('Dilahirkan');
+  const [purchaseDate, setPurchaseDate] = useState(new Date());
+  const [showPurchasePicker, setShowPurchasePicker] = useState(false);
+  const [selectedSire, setSelectedSire] = useState<Pet | null>(null);
+  const [selectedDam, setSelectedDam] = useState<Pet | null>(null);
+  const [showParentPicker, setShowParentPicker] = useState<'sire' | 'dam' | null>(null);
+  const [parentPets, setParentPets] = useState<Pet[]>([]);
+
+  const fetchParentPets = useCallback(async (g: Gender) => {
+    try {
+      const { data } = await supabase.from('pets').select('*').eq('user_id', userId).eq('gender', g).is('deleted_at', null);
+      setParentPets(data ?? []);
+    } catch { setParentPets([]); }
+  }, [userId]);
+
   const resetForm = () => {
     setName(''); setSpecies('Anjing'); setBreed(''); setDob(new Date());
     setShowPicker(false); setGender('Jantan'); setWeight('');
     setFeatherColour(''); setPostureClass('');
+    setOrigin('Dilahirkan'); setPurchaseDate(new Date()); setShowPurchasePicker(false);
+    setSelectedSire(null); setSelectedDam(null); setShowParentPicker(null); setParentPets([]);
   };
 
   const handleClose = () => { resetForm(); onClose(); };
@@ -282,6 +306,10 @@ function AddPetModal({ visible, onClose, onSuccess, userId }: AddPetModalProps) 
           health_status: 'Sihat',
           feather_colour: species === 'Ayam Serama' ? featherColour || null : null,
           posture_class: species === 'Ayam Serama' ? postureClass || null : null,
+          origin,
+          purchase_date: origin === 'Dibeli' ? purchaseDate.toISOString().split('T')[0] : null,
+          sire_id: selectedSire?.id ?? null,
+          dam_id: selectedDam?.id ?? null,
         })
         .select()
         .single();
@@ -364,6 +392,56 @@ function AddPetModal({ visible, onClose, onSuccess, userId }: AddPetModalProps) 
             <Text style={styles.fieldLabel}>Berat (kg)</Text>
             <TextInput style={styles.textInput} placeholder="Berat (kg)" placeholderTextColor={MUTED} value={weight} onChangeText={setWeight} keyboardType="decimal-pad" />
 
+            <Text style={styles.fieldLabel}>Asal Usul</Text>
+            <View style={styles.genderToggle}>
+              {(['Dilahirkan', 'Dibeli'] as const).map((o) => (
+                <TouchableOpacity key={o} style={[styles.genderButton, origin === o && styles.genderButtonActive]} onPress={() => setOrigin(o)}>
+                  <Text style={[styles.genderText, origin === o && styles.genderTextActive]}>{o}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {origin === 'Dibeli' && (
+              <>
+                <Text style={styles.fieldLabel}>Tarikh Beli</Text>
+                <TouchableOpacity style={styles.dateButton} onPress={() => setShowPurchasePicker(!showPurchasePicker)}>
+                  <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
+                  <Text style={styles.dateButtonText}>{formatDate(purchaseDate.toISOString())}</Text>
+                </TouchableOpacity>
+                {showPurchasePicker && (
+                  <DateTimePicker value={purchaseDate} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} maximumDate={new Date()} onChange={(_, s) => { if (Platform.OS === 'android') setShowPurchasePicker(false); if (s) setPurchaseDate(s); }} />
+                )}
+              </>
+            )}
+
+            <Text style={styles.fieldLabel}>Bapa (Jantan)</Text>
+            <TouchableOpacity style={styles.parentPickerButton} onPress={() => { fetchParentPets('Jantan'); setShowParentPicker('sire'); }} activeOpacity={0.8}>
+              <Text style={selectedSire ? styles.parentPickerText : styles.parentPickerPlaceholder}>
+                {selectedSire ? `${SPECIES_EMOJI[selectedSire.species]} ${selectedSire.name}` : 'Pilih Bapa...'}
+              </Text>
+              {selectedSire ? (
+                <TouchableOpacity onPress={() => setSelectedSire(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={18} color={MUTED} />
+                </TouchableOpacity>
+              ) : (
+                <Ionicons name="chevron-forward" size={16} color={MUTED} />
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.fieldLabel}>Ibu (Betina)</Text>
+            <TouchableOpacity style={styles.parentPickerButton} onPress={() => { fetchParentPets('Betina'); setShowParentPicker('dam'); }} activeOpacity={0.8}>
+              <Text style={selectedDam ? styles.parentPickerText : styles.parentPickerPlaceholder}>
+                {selectedDam ? `${SPECIES_EMOJI[selectedDam.species]} ${selectedDam.name}` : 'Pilih Ibu...'}
+              </Text>
+              {selectedDam ? (
+                <TouchableOpacity onPress={() => setSelectedDam(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={18} color={MUTED} />
+                </TouchableOpacity>
+              ) : (
+                <Ionicons name="chevron-forward" size={16} color={MUTED} />
+              )}
+            </TouchableOpacity>
+
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -373,6 +451,38 @@ function AddPetModal({ visible, onClose, onSuccess, userId }: AddPetModalProps) 
           </ScrollView>
         </View>
       </View>
+
+      {/* Parent Picker Modal */}
+      <Modal visible={showParentPicker !== null} transparent animationType="slide" onRequestClose={() => setShowParentPicker(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: '70%' }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{showParentPicker === 'sire' ? 'Pilih Bapa' : 'Pilih Ibu'}</Text>
+            <FlatList
+              data={parentPets}
+              keyExtractor={(item) => item.id}
+              ListHeaderComponent={() => (
+                <TouchableOpacity style={styles.parentPickerRow} onPress={() => { showParentPicker === 'sire' ? setSelectedSire(null) : setSelectedDam(null); setShowParentPicker(null); }}>
+                  <View style={styles.parentPickerRowAvatar}><Text style={{ fontSize: 18 }}>🚫</Text></View>
+                  <Text style={[styles.parentPickerText, { flex: 1 }]}>Tiada / Kosongkan</Text>
+                </TouchableOpacity>
+              )}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.parentPickerRow} onPress={() => { showParentPicker === 'sire' ? setSelectedSire(item) : setSelectedDam(item); setShowParentPicker(null); }}>
+                  <View style={styles.parentPickerRowAvatar}>
+                    <Text style={{ fontSize: 22 }}>{SPECIES_EMOJI[item.species]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.parentPickerText}>{item.name}</Text>
+                    <Text style={{ fontSize: 12, color: MUTED }}>{item.gender}{item.posture_class ? ` · ${item.posture_class}` : ''}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={() => <Text style={{ textAlign: 'center', color: MUTED, padding: 20 }}>Tiada haiwan ditemui</Text>}
+            />
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -398,6 +508,23 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
   const [postureClass, setPostureClass] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // New fields
+  const [origin, setOrigin] = useState<'Dilahirkan' | 'Dibeli'>('Dilahirkan');
+  const [purchaseDate, setPurchaseDate] = useState(new Date());
+  const [showPurchasePicker, setShowPurchasePicker] = useState(false);
+  const [selectedSire, setSelectedSire] = useState<Pet | null>(null);
+  const [selectedDam, setSelectedDam] = useState<Pet | null>(null);
+  const [showParentPicker, setShowParentPicker] = useState<'sire' | 'dam' | null>(null);
+  const [parentPets, setParentPets] = useState<Pet[]>([]);
+
+  const fetchParentPets = useCallback(async (g: Gender) => {
+    if (!pet) return;
+    try {
+      const { data } = await supabase.from('pets').select('*').eq('user_id', pet.user_id).eq('gender', g).is('deleted_at', null);
+      setParentPets((data ?? []).filter((p: Pet) => p.id !== pet.id));
+    } catch { setParentPets([]); }
+  }, [pet]);
+
   useEffect(() => {
     if (pet) {
       setName(pet.name ?? '');
@@ -409,6 +536,28 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
       setHealthStatus(pet.health_status ?? 'Sihat');
       setFeatherColour(pet.feather_colour ?? '');
       setPostureClass(pet.posture_class ?? '');
+      setOrigin(pet.origin ?? 'Dilahirkan');
+      setPurchaseDate(pet.purchase_date ? new Date(pet.purchase_date) : new Date());
+      setShowPurchasePicker(false);
+      setShowParentPicker(null);
+      setParentPets([]);
+      // Fetch sire/dam names
+      if (pet.sire_id || pet.dam_id) {
+        (async () => {
+          try {
+            const { data } = await supabase.from('pets').select('*').eq('user_id', pet.user_id).is('deleted_at', null);
+            const allPets: Pet[] = data ?? [];
+            setSelectedSire(pet.sire_id ? (allPets.find((p) => p.id === pet.sire_id) ?? null) : null);
+            setSelectedDam(pet.dam_id ? (allPets.find((p) => p.id === pet.dam_id) ?? null) : null);
+          } catch {
+            setSelectedSire(null);
+            setSelectedDam(null);
+          }
+        })();
+      } else {
+        setSelectedSire(null);
+        setSelectedDam(null);
+      }
     }
   }, [pet]);
 
@@ -426,6 +575,10 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
           health_status: healthStatus,
           feather_colour: species === 'Ayam Serama' ? featherColour || null : null,
           posture_class: species === 'Ayam Serama' ? postureClass || null : null,
+          origin,
+          purchase_date: origin === 'Dibeli' ? purchaseDate.toISOString().split('T')[0] : null,
+          sire_id: selectedSire?.id ?? null,
+          dam_id: selectedDam?.id ?? null,
         })
         .eq('id', pet.id)
         .select()
@@ -516,6 +669,56 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
             <Text style={styles.fieldLabel}>Berat (kg)</Text>
             <TextInput style={styles.textInput} placeholder="Berat (kg)" placeholderTextColor={MUTED} value={weight} onChangeText={setWeight} keyboardType="decimal-pad" />
 
+            <Text style={styles.fieldLabel}>Asal Usul</Text>
+            <View style={styles.genderToggle}>
+              {(['Dilahirkan', 'Dibeli'] as const).map((o) => (
+                <TouchableOpacity key={o} style={[styles.genderButton, origin === o && styles.genderButtonActive]} onPress={() => setOrigin(o)}>
+                  <Text style={[styles.genderText, origin === o && styles.genderTextActive]}>{o}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {origin === 'Dibeli' && (
+              <>
+                <Text style={styles.fieldLabel}>Tarikh Beli</Text>
+                <TouchableOpacity style={styles.dateButton} onPress={() => setShowPurchasePicker(!showPurchasePicker)}>
+                  <Ionicons name="calendar-outline" size={16} color={PRIMARY} />
+                  <Text style={styles.dateButtonText}>{formatDate(purchaseDate.toISOString())}</Text>
+                </TouchableOpacity>
+                {showPurchasePicker && (
+                  <DateTimePicker value={purchaseDate} mode="date" display={Platform.OS === 'ios' ? 'inline' : 'default'} maximumDate={new Date()} onChange={(_, s) => { if (Platform.OS === 'android') setShowPurchasePicker(false); if (s) setPurchaseDate(s); }} />
+                )}
+              </>
+            )}
+
+            <Text style={styles.fieldLabel}>Bapa (Jantan)</Text>
+            <TouchableOpacity style={styles.parentPickerButton} onPress={() => { fetchParentPets('Jantan'); setShowParentPicker('sire'); }} activeOpacity={0.8}>
+              <Text style={selectedSire ? styles.parentPickerText : styles.parentPickerPlaceholder}>
+                {selectedSire ? `${SPECIES_EMOJI[selectedSire.species]} ${selectedSire.name}` : 'Pilih Bapa...'}
+              </Text>
+              {selectedSire ? (
+                <TouchableOpacity onPress={() => setSelectedSire(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={18} color={MUTED} />
+                </TouchableOpacity>
+              ) : (
+                <Ionicons name="chevron-forward" size={16} color={MUTED} />
+              )}
+            </TouchableOpacity>
+
+            <Text style={styles.fieldLabel}>Ibu (Betina)</Text>
+            <TouchableOpacity style={styles.parentPickerButton} onPress={() => { fetchParentPets('Betina'); setShowParentPicker('dam'); }} activeOpacity={0.8}>
+              <Text style={selectedDam ? styles.parentPickerText : styles.parentPickerPlaceholder}>
+                {selectedDam ? `${SPECIES_EMOJI[selectedDam.species]} ${selectedDam.name}` : 'Pilih Ibu...'}
+              </Text>
+              {selectedDam ? (
+                <TouchableOpacity onPress={() => setSelectedDam(null)} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Ionicons name="close-circle" size={18} color={MUTED} />
+                </TouchableOpacity>
+              ) : (
+                <Ionicons name="chevron-forward" size={16} color={MUTED} />
+              )}
+            </TouchableOpacity>
+
             <TouchableOpacity style={[styles.saveButton, saving && styles.saveButtonDisabled]} onPress={handleSave} disabled={saving}>
               <Text style={styles.saveButtonText}>{saving ? 'Menyimpan...' : 'Simpan'}</Text>
             </TouchableOpacity>
@@ -525,6 +728,38 @@ function EditPetModal({ visible, pet, onClose, onSuccess }: EditPetModalProps) {
           </ScrollView>
         </View>
       </View>
+
+      {/* Parent Picker Modal */}
+      <Modal visible={showParentPicker !== null} transparent animationType="slide" onRequestClose={() => setShowParentPicker(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: '70%' }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{showParentPicker === 'sire' ? 'Pilih Bapa' : 'Pilih Ibu'}</Text>
+            <FlatList
+              data={parentPets}
+              keyExtractor={(item) => item.id}
+              ListHeaderComponent={() => (
+                <TouchableOpacity style={styles.parentPickerRow} onPress={() => { showParentPicker === 'sire' ? setSelectedSire(null) : setSelectedDam(null); setShowParentPicker(null); }}>
+                  <View style={styles.parentPickerRowAvatar}><Text style={{ fontSize: 18 }}>🚫</Text></View>
+                  <Text style={[styles.parentPickerText, { flex: 1 }]}>Tiada / Kosongkan</Text>
+                </TouchableOpacity>
+              )}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.parentPickerRow} onPress={() => { showParentPicker === 'sire' ? setSelectedSire(item) : setSelectedDam(item); setShowParentPicker(null); }}>
+                  <View style={styles.parentPickerRowAvatar}>
+                    <Text style={{ fontSize: 22 }}>{SPECIES_EMOJI[item.species]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.parentPickerText}>{item.name}</Text>
+                    <Text style={{ fontSize: 12, color: MUTED }}>{item.gender}{item.posture_class ? ` · ${item.posture_class}` : ''}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={() => <Text style={{ textAlign: 'center', color: MUTED, padding: 20 }}>Tiada haiwan ditemui</Text>}
+            />
+          </View>
+        </View>
+      </Modal>
     </Modal>
   );
 }
@@ -901,9 +1136,9 @@ function AddPhotoModal({ visible, petId, userId, onClose, onSuccess }: { visible
     try {
       const ext = imageUri.split('.').pop() ?? 'jpg';
       const fileName = `${userId}/${petId}/${Date.now()}.${ext}`;
-      const response = await fetch(imageUri);
-      const blob = await response.blob();
-      const { error: uploadError } = await supabase.storage.from('pet-photos').upload(fileName, blob, { contentType: `image/${ext}` });
+      const { decode } = await import('base64-arraybuffer');
+      const base64 = await FileSystem.readAsStringAsync(imageUri, { encoding: 'base64' as any });
+      const { error: uploadError } = await supabase.storage.from('pet-photos').upload(fileName, decode(base64), { contentType: `image/${ext}` });
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(fileName);
       const { error: insertError } = await supabase.from('pet_photos').insert({
@@ -948,20 +1183,305 @@ function AddPhotoModal({ visible, petId, userId, onClose, onSuccess }: { visible
   );
 }
 
+// ─── Susur Galur Tab ──────────────────────────────────────────────────────────
+interface SusurGalurTabProps {
+  pet: Pet;
+  allPets: Pet[];
+  onRefresh: () => void;
+  onSelectPet: (pet: Pet) => void;
+}
+
+function SusurGalurTab({ pet, allPets, onRefresh, onSelectPet }: SusurGalurTabProps) {
+  const [depth, setDepth] = useState<'parents' | 'grandparents'>('parents');
+  const [pickerSlot, setPickerSlot] = useState<'sire' | 'dam' | null>(null);
+  const [pickerPets, setPickerPets] = useState<Pet[]>([]);
+  const [children, setChildren] = useState<Pet[]>([]);
+  const [loadingChildren, setLoadingChildren] = useState(false);
+  const [addChildModal, setAddChildModal] = useState(false);
+  const [addChildPets, setAddChildPets] = useState<Pet[]>([]);
+  const [updatingParent, setUpdatingParent] = useState(false);
+
+  const bapa = allPets.find((p) => p.id === pet.sire_id) ?? null;
+  const ibu = allPets.find((p) => p.id === pet.dam_id) ?? null;
+  const datukSebelahBapa = depth === 'grandparents' && bapa ? (allPets.find((p) => p.id === bapa.sire_id) ?? null) : null;
+  const nenekSebelahBapa = depth === 'grandparents' && bapa ? (allPets.find((p) => p.id === bapa.dam_id) ?? null) : null;
+  const datukSebelahIbu = depth === 'grandparents' && ibu ? (allPets.find((p) => p.id === ibu.sire_id) ?? null) : null;
+  const nenekSebelahIbu = depth === 'grandparents' && ibu ? (allPets.find((p) => p.id === ibu.dam_id) ?? null) : null;
+
+  const fetchChildren = useCallback(async () => {
+    setLoadingChildren(true);
+    try {
+      const { data } = await supabase.from('pets').select('*')
+        .or(`sire_id.eq.${pet.id},dam_id.eq.${pet.id}`)
+        .is('deleted_at', null);
+      setChildren(data ?? []);
+    } finally { setLoadingChildren(false); }
+  }, [pet.id]);
+
+  useEffect(() => { fetchChildren(); }, [fetchChildren]);
+
+  const openParentPicker = (slot: 'sire' | 'dam') => {
+    const g: Gender = slot === 'sire' ? 'Jantan' : 'Betina';
+    setPickerPets(allPets.filter((p) => p.gender === g && p.id !== pet.id));
+    setPickerSlot(slot);
+  };
+
+  const handleParentSelect = async (selected: Pet | null) => {
+    if (!pickerSlot) return;
+    setUpdatingParent(true);
+    try {
+      const field = pickerSlot === 'sire' ? 'sire_id' : 'dam_id';
+      const { error } = await supabase.from('pets').update({ [field]: selected?.id ?? null }).eq('id', pet.id);
+      if (error) throw error;
+      onRefresh();
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal mengemaskini.');
+    } finally {
+      setUpdatingParent(false);
+      setPickerSlot(null);
+    }
+  };
+
+  const openAddChildModal = async () => {
+    try {
+      const childIds = children.map((c) => c.id);
+      const { data } = await supabase.from('pets').select('*').eq('user_id', pet.user_id).is('deleted_at', null);
+      setAddChildPets((data ?? []).filter((p: Pet) => p.id !== pet.id && !childIds.includes(p.id)));
+    } catch { setAddChildPets([]); }
+    setAddChildModal(true);
+  };
+
+  const handleAddChild = async (child: Pet) => {
+    try {
+      const field = pet.gender === 'Jantan' ? 'sire_id' : 'dam_id';
+      const { error } = await supabase.from('pets').update({ [field]: pet.id }).eq('id', child.id);
+      if (error) throw error;
+      fetchChildren();
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal menambah anak.');
+    } finally { setAddChildModal(false); }
+  };
+
+  // ── Node component ──
+  const TreeNode = ({ nodePet, label, isCurrent = false, onTap }: { nodePet: Pet | null; label: string; isCurrent?: boolean; onTap: () => void }) => {
+    if (nodePet) {
+      return (
+        <TouchableOpacity style={[styles.treeNode, isCurrent && styles.treeNodeCurrent]} onPress={onTap} activeOpacity={0.8}>
+          <View style={styles.treeNodeAvatar}>
+            <Text style={{ fontSize: isCurrent ? 22 : 18 }}>{SPECIES_EMOJI[nodePet.species] ?? '🐾'}</Text>
+          </View>
+          <Text style={[styles.treeNodeName, isCurrent && { fontWeight: '800' }]} numberOfLines={1}>{nodePet.name}</Text>
+          <Text style={styles.treeNodeSub} numberOfLines={1}>{nodePet.gender}{nodePet.posture_class ? ` · ${nodePet.posture_class}` : ''}</Text>
+        </TouchableOpacity>
+      );
+    }
+    if (isCurrent) {
+      return (
+        <View style={[styles.treeNode, styles.treeNodeCurrent]}>
+          <View style={styles.treeNodeAvatar}><Text style={{ fontSize: 22 }}>🐾</Text></View>
+          <Text style={[styles.treeNodeName, { fontWeight: '800' }]} numberOfLines={1}>Tidak Diketahui</Text>
+        </View>
+      );
+    }
+    return (
+      <TouchableOpacity style={styles.treeNodeEmpty} onPress={onTap} activeOpacity={0.8}>
+        <Text style={styles.treeNodeEmptyLabel}>{label}</Text>
+        <Text style={styles.treeNodeEmptyAdd}>+ Tambah</Text>
+      </TouchableOpacity>
+    );
+  };
+
+  const ConnectorV = ({ height = 16 }: { height?: number }) => (
+    <View style={{ width: 1.5, height, backgroundColor: '#C5CAE9', alignSelf: 'center' }} />
+  );
+
+  return (
+    <View style={{ gap: 12 }}>
+      {/* Depth toggle */}
+      <View style={styles.depthToggle}>
+        {(['parents', 'grandparents'] as const).map((d) => (
+          <TouchableOpacity key={d} style={[styles.depthButton, depth === d && styles.depthButtonActive]} onPress={() => setDepth(d)}>
+            <Text style={[styles.depthButtonText, depth === d && styles.depthButtonTextActive]}>
+              {d === 'parents' ? 'Ibu Bapa Sahaja' : '+ Datuk & Nenek'}
+            </Text>
+          </TouchableOpacity>
+        ))}
+      </View>
+
+      {/* Family tree */}
+      <View style={styles.treeContainer}>
+        {/* Grandparents level */}
+        {depth === 'grandparents' && (
+          <>
+            <View style={styles.treeRow}>
+              {/* Bapa's parents */}
+              <View style={styles.treeHalf}>
+                <TreeNode nodePet={datukSebelahBapa} label="Datuk" onTap={() => datukSebelahBapa && onSelectPet(datukSebelahBapa)} />
+                <TreeNode nodePet={nenekSebelahBapa} label="Nenek" onTap={() => nenekSebelahBapa && onSelectPet(nenekSebelahBapa)} />
+              </View>
+              <View style={{ width: 12 }} />
+              {/* Ibu's parents */}
+              <View style={styles.treeHalf}>
+                <TreeNode nodePet={datukSebelahIbu} label="Datuk" onTap={() => datukSebelahIbu && onSelectPet(datukSebelahIbu)} />
+                <TreeNode nodePet={nenekSebelahIbu} label="Nenek" onTap={() => nenekSebelahIbu && onSelectPet(nenekSebelahIbu)} />
+              </View>
+            </View>
+            {/* Connectors from GP to parents */}
+            <View style={styles.treeRow}>
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <ConnectorV />
+              </View>
+              <View style={{ width: 12 }} />
+              <View style={{ flex: 1, alignItems: 'center' }}>
+                <ConnectorV />
+              </View>
+            </View>
+          </>
+        )}
+
+        {/* Parents level */}
+        <View style={styles.treeRow}>
+          <View style={{ flex: 1 }}>
+            <TreeNode nodePet={bapa} label="Bapa" onTap={() => bapa ? onSelectPet(bapa) : openParentPicker('sire')} />
+          </View>
+          <View style={{ width: 12 }} />
+          <View style={{ flex: 1 }}>
+            <TreeNode nodePet={ibu} label="Ibu" onTap={() => ibu ? onSelectPet(ibu) : openParentPicker('dam')} />
+          </View>
+        </View>
+
+        {/* Connector from parents to current */}
+        <View style={{ flexDirection: 'row', alignItems: 'flex-start', height: 24 }}>
+          <View style={{ flex: 1, alignItems: 'flex-end' }}>
+            <View style={{ width: '50%', height: 1.5, backgroundColor: '#C5CAE9', marginTop: 12 }} />
+          </View>
+          <View style={{ width: 1.5, height: 24, backgroundColor: '#C5CAE9' }} />
+          <View style={{ flex: 1, alignItems: 'flex-start' }}>
+            <View style={{ width: '50%', height: 1.5, backgroundColor: '#C5CAE9', marginTop: 12 }} />
+          </View>
+        </View>
+
+        {/* Current pet */}
+        <View style={{ alignItems: 'center' }}>
+          <View style={[styles.treeNode, styles.treeNodeCurrent, { width: 120 }]}>
+            <View style={styles.treeNodeAvatar}>
+              <Text style={{ fontSize: 22 }}>{SPECIES_EMOJI[pet.species] ?? '🐾'}</Text>
+            </View>
+            <Text style={[styles.treeNodeName, { fontWeight: '800' }]} numberOfLines={1}>{pet.name}</Text>
+            <Text style={styles.treeNodeSub} numberOfLines={1}>{pet.gender}{pet.posture_class ? ` · ${pet.posture_class}` : ''}</Text>
+          </View>
+        </View>
+      </View>
+
+      {/* Children section */}
+      <View style={styles.treeDivider} />
+      <Text style={styles.treeChildrenLabel}>Anak-anak</Text>
+
+      {loadingChildren ? (
+        <Text style={styles.loadingText}>Memuatkan...</Text>
+      ) : children.length === 0 ? (
+        <View style={styles.emptyRecords}>
+          <Text style={{ fontSize: 28 }}>🐣</Text>
+          <Text style={styles.emptyRecordsText}>Tiada anak didaftarkan</Text>
+        </View>
+      ) : children.map((child) => (
+        <View key={child.id} style={styles.childRow}>
+          <View style={styles.childAvatar}>
+            <Text style={{ fontSize: 20 }}>{SPECIES_EMOJI[child.species] ?? '🐾'}</Text>
+          </View>
+          <View style={{ flex: 1 }}>
+            <Text style={styles.recordTitle}>{child.name}</Text>
+            <Text style={styles.recordDate}>{child.gender} · {calcAge(child.dob)}</Text>
+          </View>
+          <TouchableOpacity style={styles.childLihatBtn} onPress={() => onSelectPet(child)}>
+            <Text style={styles.childLihatText}>Lihat</Text>
+          </TouchableOpacity>
+        </View>
+      ))}
+
+      <TouchableOpacity style={styles.addChildDashed} onPress={openAddChildModal} activeOpacity={0.8}>
+        <Text style={styles.addChildDashedText}>+ Tambah anak</Text>
+      </TouchableOpacity>
+
+      {/* Parent picker modal */}
+      <Modal visible={pickerSlot !== null} transparent animationType="slide" onRequestClose={() => setPickerSlot(null)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: '70%' }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{pickerSlot === 'sire' ? 'Pilih Bapa' : 'Pilih Ibu'}</Text>
+            <FlatList
+              data={pickerPets}
+              keyExtractor={(item) => item.id}
+              ListHeaderComponent={() => (
+                <TouchableOpacity style={styles.parentPickerRow} onPress={() => handleParentSelect(null)}>
+                  <View style={styles.parentPickerRowAvatar}><Text style={{ fontSize: 18 }}>🚫</Text></View>
+                  <Text style={[styles.parentPickerText, { flex: 1 }]}>Tiada / Kosongkan</Text>
+                </TouchableOpacity>
+              )}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.parentPickerRow} onPress={() => handleParentSelect(item)} disabled={updatingParent}>
+                  <View style={styles.parentPickerRowAvatar}>
+                    <Text style={{ fontSize: 22 }}>{SPECIES_EMOJI[item.species]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.parentPickerText}>{item.name}</Text>
+                    <Text style={{ fontSize: 12, color: MUTED }}>{item.gender}{item.posture_class ? ` · ${item.posture_class}` : ''}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={() => <Text style={{ textAlign: 'center', color: MUTED, padding: 20 }}>Tiada haiwan ditemui</Text>}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      {/* Add child modal */}
+      <Modal visible={addChildModal} transparent animationType="slide" onRequestClose={() => setAddChildModal(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { maxHeight: '70%' }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Pilih Anak</Text>
+            <FlatList
+              data={addChildPets}
+              keyExtractor={(item) => item.id}
+              renderItem={({ item }) => (
+                <TouchableOpacity style={styles.parentPickerRow} onPress={() => handleAddChild(item)}>
+                  <View style={styles.parentPickerRowAvatar}>
+                    <Text style={{ fontSize: 22 }}>{SPECIES_EMOJI[item.species]}</Text>
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.parentPickerText}>{item.name}</Text>
+                    <Text style={{ fontSize: 12, color: MUTED }}>{item.gender} · {calcAge(item.dob)}</Text>
+                  </View>
+                </TouchableOpacity>
+              )}
+              ListEmptyComponent={() => <Text style={{ textAlign: 'center', color: MUTED, padding: 20 }}>Tiada haiwan lain untuk ditambah</Text>}
+            />
+            <TouchableOpacity style={styles.cancelButton} onPress={() => setAddChildModal(false)}>
+              <Text style={styles.cancelButtonText}>Batal</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+    </View>
+  );
+}
+
 // ─── Pet Detail ───────────────────────────────────────────────────────────────
 interface PetDetailProps {
   pet: Pet;
   onEdit: () => void;
   onAvatarUpdate: (updated: Pet) => void;
+  onSelectPet: (pet: Pet) => void;
 }
 
-function PetDetail({ pet, onEdit, onAvatarUpdate }: PetDetailProps) {
+function PetDetail({ pet, onEdit, onAvatarUpdate, onSelectPet }: PetDetailProps) {
   const { user } = useAuthStore();
   const isSerama = pet.species === 'Ayam Serama';
 
   const TABS: TabKey[] = isSerama
-    ? ['Kesihatan', 'Pertandingan', 'Telur', 'Perbelanjaan']
-    : ['Kesihatan', 'Perbelanjaan', 'Galeri', 'Dokumen'];
+    ? ['Kesihatan', 'Pertandingan', 'Telur', 'Perbelanjaan', 'Susur Galur']
+    : ['Kesihatan', 'Perbelanjaan', 'Galeri', 'Dokumen', 'Susur Galur'];
 
   const [activeTab, setActiveTab] = useState<TabKey>('Kesihatan');
   const [healthRecords, setHealthRecords] = useState<HealthRecord[]>([]);
@@ -996,6 +1516,8 @@ function PetDetail({ pet, onEdit, onAvatarUpdate }: PetDetailProps) {
   const [photoModal, setPhotoModal] = useState(false);
   const [eggModal, setEggModal] = useState(false);
 
+  const [allPets, setAllPets] = useState<Pet[]>([]);
+
   // ── Avatar upload ──────────────────────────────────────────────────────────
   const handleAvatarPress = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -1016,11 +1538,11 @@ function PetDetail({ pet, onEdit, onAvatarUpdate }: PetDetailProps) {
       const ext = uri.split('.').pop() ?? 'jpg';
       // Use a fixed filename per pet so repeated uploads replace the previous avatar
       const fileName = `avatars/${user!.id}/${pet.id}.${ext}`;
-      const response = await fetch(uri);
-      const blob = await response.blob();
+      const { decode } = await import('base64-arraybuffer');
+      const base64 = await FileSystem.readAsStringAsync(uri, { encoding: 'base64' as any });
       const { error: uploadError } = await supabase.storage
         .from('pet-photos')
-        .upload(fileName, blob, { contentType: `image/${ext}`, upsert: true });
+        .upload(fileName, decode(base64), { contentType: `image/${ext}`, upsert: true });
       if (uploadError) throw uploadError;
       const { data: urlData } = supabase.storage.from('pet-photos').getPublicUrl(fileName);
       // Append cache-buster so React Native re-renders the image
@@ -1112,7 +1634,22 @@ function PetDetail({ pet, onEdit, onAvatarUpdate }: PetDetailProps) {
     } finally { setLoadingPhotos(false); }
   }, [pet.id]);
 
-  useEffect(() => { fetchStats(); fetchHealthRecords(); }, [fetchStats, fetchHealthRecords]);
+  const fetchAllPets = useCallback(async () => {
+    try {
+      const { data } = await supabase.from('pets').select('*').eq('user_id', pet.user_id).is('deleted_at', null);
+      setAllPets(data ?? []);
+    } catch { setAllPets([]); }
+  }, [pet.user_id]);
+
+  const handleSusurGalurRefresh = useCallback(async () => {
+    fetchAllPets();
+    try {
+      const { data } = await supabase.from('pets').select('*').eq('id', pet.id).single();
+      if (data) onAvatarUpdate(data as Pet);
+    } catch {}
+  }, [fetchAllPets, pet.id, onAvatarUpdate]);
+
+  useEffect(() => { fetchStats(); fetchHealthRecords(); fetchAllPets(); }, [fetchStats, fetchHealthRecords, fetchAllPets]);
 
   useEffect(() => {
     if (activeTab === 'Pertandingan') fetchShowRecords();
@@ -1120,7 +1657,8 @@ function PetDetail({ pet, onEdit, onAvatarUpdate }: PetDetailProps) {
     if (activeTab === 'Perbelanjaan') fetchPetExpenses();
     if (activeTab === 'Dokumen') fetchDocuments();
     if (activeTab === 'Galeri') fetchPhotos();
-  }, [activeTab, fetchShowRecords, fetchEggBatches, fetchPetExpenses, fetchDocuments, fetchPhotos]);
+    if (activeTab === 'Susur Galur') fetchAllPets();
+  }, [activeTab, fetchShowRecords, fetchEggBatches, fetchPetExpenses, fetchDocuments, fetchPhotos, fetchAllPets]);
 
   const emoji = SPECIES_EMOJI[pet.species] ?? '🐾';
   const nextBatchNumber = eggBatches.length > 0 ? Math.max(...eggBatches.map((b) => b.batch_number)) + 1 : 1;
@@ -1403,6 +1941,18 @@ function PetDetail({ pet, onEdit, onAvatarUpdate }: PetDetailProps) {
         </View>
       )}
 
+      {/* ── Susur Galur ── */}
+      {activeTab === 'Susur Galur' && (
+        <View style={styles.tabContent}>
+          <SusurGalurTab
+            pet={pet}
+            allPets={allPets}
+            onRefresh={handleSusurGalurRefresh}
+            onSelectPet={onSelectPet}
+          />
+        </View>
+      )}
+
       {/* ── Modals ── */}
       {user && <AddShowRecordModal visible={showModal} petId={pet.id} userId={user.id} onClose={() => setShowModal(false)} onSuccess={() => { setShowModal(false); fetchShowRecords(); fetchStats(); }} />}
       {user && <AddEggBatchModal visible={eggModal} petId={pet.id} userId={user.id} nextBatchNumber={nextBatchNumber} onClose={() => setEggModal(false)} onSuccess={() => { setEggModal(false); fetchEggBatches(); }} />}
@@ -1540,6 +2090,7 @@ export default function PetsScreen() {
                 pet={selectedPet}
                 onEdit={() => { setEditingPet(selectedPet); setShowEditModal(true); }}
                 onAvatarUpdate={handleAvatarUpdate}
+                onSelectPet={setSelectedPet}
               />
             )}
           </>
@@ -1733,4 +2284,68 @@ const styles = StyleSheet.create({
   saveButtonText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
   cancelButton: { padding: 14, alignItems: 'center', marginTop: 4, marginBottom: 8 },
   cancelButtonText: { fontSize: 15, color: MUTED, fontWeight: '500' },
+
+  // ── Parent picker
+  parentPickerButton: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    borderWidth: 1, borderColor: '#E0E0E0', borderRadius: 12,
+    paddingHorizontal: 14, paddingVertical: 12, backgroundColor: '#FFFFFF',
+  },
+  parentPickerText: { fontSize: 15, color: INK, flex: 1 },
+  parentPickerPlaceholder: { fontSize: 15, color: MUTED, flex: 1 },
+  parentPickerRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingVertical: 12, paddingHorizontal: 4,
+    borderBottomWidth: 1, borderBottomColor: '#F0F0F0',
+  },
+  parentPickerRowAvatar: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: INDIGO_LIGHT, alignItems: 'center', justifyContent: 'center',
+  },
+
+  // ── Susur Galur / Family tree
+  depthToggle: { flexDirection: 'row', backgroundColor: '#F0F0F0', borderRadius: 12, padding: 4, gap: 4 },
+  depthButton: { flex: 1, paddingVertical: 8, borderRadius: 10, alignItems: 'center' },
+  depthButtonActive: { backgroundColor: PRIMARY },
+  depthButtonText: { fontSize: 12, fontWeight: '600', color: MUTED },
+  depthButtonTextActive: { color: '#FFFFFF' },
+  treeContainer: { gap: 0, alignItems: 'stretch' },
+  treeRow: { flexDirection: 'row', justifyContent: 'center', marginBottom: 0 },
+  treeHalf: { flex: 1, flexDirection: 'row', gap: 4, justifyContent: 'center' },
+  treeNode: {
+    flex: 1, backgroundColor: INDIGO_LIGHT, borderRadius: 12,
+    padding: 8, alignItems: 'center', gap: 3,
+    borderWidth: 1.5, borderColor: 'transparent',
+  },
+  treeNodeCurrent: { borderColor: PRIMARY, backgroundColor: INDIGO_LIGHT, borderWidth: 2 },
+  treeNodeAvatar: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#E8EAF6', alignItems: 'center', justifyContent: 'center',
+  },
+  treeNodeName: { fontSize: 12, fontWeight: '700', color: INK, textAlign: 'center' },
+  treeNodeSub: { fontSize: 10, color: MUTED, textAlign: 'center' },
+  treeNodeEmpty: {
+    flex: 1, borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed',
+    borderColor: '#C5CAE9', padding: 8, alignItems: 'center', justifyContent: 'center',
+    gap: 3, minHeight: 70,
+  },
+  treeNodeEmptyLabel: { fontSize: 11, color: MUTED, textAlign: 'center' },
+  treeNodeEmptyAdd: { fontSize: 12, fontWeight: '700', color: PRIMARY, textAlign: 'center' },
+  treeDivider: { height: 1, backgroundColor: '#E0E0E0', marginVertical: 4 },
+  treeChildrenLabel: { fontSize: 14, fontWeight: '700', color: INK },
+  childRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10,
+    backgroundColor: INDIGO_LIGHT, borderRadius: 12, padding: 10,
+  },
+  childAvatar: {
+    width: 40, height: 40, borderRadius: 20,
+    backgroundColor: '#E8EAF6', alignItems: 'center', justifyContent: 'center',
+  },
+  childLihatBtn: { backgroundColor: PRIMARY, borderRadius: 8, paddingVertical: 6, paddingHorizontal: 12 },
+  childLihatText: { fontSize: 12, fontWeight: '700', color: '#FFFFFF' },
+  addChildDashed: {
+    borderRadius: 12, borderWidth: 1.5, borderStyle: 'dashed', borderColor: PRIMARY,
+    padding: 12, alignItems: 'center',
+  },
+  addChildDashedText: { fontSize: 14, fontWeight: '600', color: PRIMARY },
 });

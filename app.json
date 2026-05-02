@@ -26,7 +26,19 @@
       "predictiveBackGestureEnabled": false,
       "permissions": [
         "android.permission.ACCESS_COARSE_LOCATION",
-        "android.permission.ACCESS_FINE_LOCATION"
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.CAMERA",
+        "android.permission.READ_MEDIA_IMAGES",
+        "android.permission.READ_EXTERNAL_STORAGE",
+        "android.permission.WRITE_EXTERNAL_STORAGE",
+        "android.permission.RECORD_AUDIO"
       ]
     },
     "web": {
@@ -43,6 +55,13 @@
           "locationAlwaysAndWhenInUsePermission": "Aplikasi ini memerlukan akses lokasi untuk mencari klinik veterinar berhampiran.",
           "locationWhenInUsePermission": "Aplikasi ini memerlukan akses lokasi untuk mencari klinik veterinar berhampiran."
         }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Aplikasi ini memerlukan akses galeri foto untuk tukar gambar profil.",
+          "cameraPermission": "Aplikasi ini memerlukan akses kamera untuk ambil gambar profil."
+        }
       ]
     ],
     "extra": {
@@ -51,6 +70,12 @@
         "projectId": "9db9e704-bd94-49ec-9ac1-6b1a6f861fd7"
       }
     },
-    "owner": "amranzz"
+    "owner": "amranzz",
+    "runtimeVersion": {
+      "policy": "appVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/9db9e704-bd94-49ec-9ac1-6b1a6f861fd7"
+    }
   }
 }

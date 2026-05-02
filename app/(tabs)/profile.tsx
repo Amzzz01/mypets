@@ -1,6 +1,8 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import {
+  ActivityIndicator,
   Alert,
+  Image,
   Platform,
   ScrollView,
   Share,
@@ -12,8 +14,9 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import * as ImagePicker from 'expo-image-picker';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '../../lib/supabase';
 import { useAuthStore } from '../../store/authStore';
@@ -96,41 +99,108 @@ function SettingsGroup({ title, children }: { title: string; children: React.Rea
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function ProfileScreen() {
   const { t, i18n } = useTranslation();
-  const { user, role, updateRole } = useAuthStore();
+  const { user, role, profileName, updateRole, updateAvatar, fetchUserProfile, logout } = useAuthStore();
 
-  const [displayName, setDisplayName] = useState('');
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [location, setLocation] = useState('');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('light');
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
 
-  useEffect(() => {
-    if (user) {
-      fetchProfile();
-      loadPreferences();
-    }
-  }, [user]);
-
-  const fetchProfile = async () => {
+  // ── Fetch profile ──────────────────────────────────────────────────────────
+  const fetchProfile = useCallback(async () => {
     if (!user) return;
+    // Sync name into store
+    await fetchUserProfile();
+    // Fetch location and avatar_url from DB
     const { data } = await supabase
       .from('users')
-      .select('name, location')
+      .select('location, avatar_url')
       .eq('id', user.id)
       .maybeSingle();
-    setDisplayName(data?.name ?? user.email ?? '');
     setLocation(data?.location ?? '');
+    setAvatarUrl(data?.avatar_url ?? null);
     setLoading(false);
-  };
+  }, [user, fetchUserProfile]);
 
-  const loadPreferences = async () => {
+  const loadPreferences = useCallback(async () => {
     const [notif, savedTheme] = await Promise.all([
       AsyncStorage.getItem('notifications_enabled'),
       AsyncStorage.getItem('app_theme'),
     ]);
     if (notif !== null) setNotificationsEnabled(notif === 'true');
     if (savedTheme === 'dark' || savedTheme === 'light') setTheme(savedTheme);
+  }, []);
+
+  // Re-fetch every time this screen comes into focus
+  useFocusEffect(
+    useCallback(() => {
+      fetchProfile();
+      loadPreferences();
+    }, [fetchProfile, loadPreferences])
+  );
+
+  // ── Avatar upload ──────────────────────────────────────────────────────────
+  const uploadAvatar = async (asset: ImagePicker.ImagePickerAsset) => {
+    if (!user) return;
+    setUploadingAvatar(true);
+    try {
+      const mimeType = asset.mimeType ?? 'image/jpeg';
+      const fileName = `${user.id}/avatar.jpeg`; // always store as jpeg
+      const { decode } = await import('base64-arraybuffer');
+      
+      if (!asset.base64) throw new Error('Data gambar (base64) tidak ditemui.');
+
+      const { error: uploadError } = await supabase.storage
+        .from('user-avatars')
+        .upload(fileName, decode(asset.base64), { contentType: mimeType, upsert: true });
+      if (uploadError) throw uploadError;
+      const { data: urlData } = supabase.storage.from('user-avatars').getPublicUrl(fileName);
+      const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`;
+      await supabase.from('users').update({ avatar_url: publicUrl }).eq('id', user.id);
+      setAvatarUrl(publicUrl);
+    } catch (err: any) {
+      Alert.alert('Ralat', err?.message ?? 'Gagal memuat naik gambar profil.');
+    } finally {
+      setUploadingAvatar(false);
+    }
+  };
+
+  const handleAvatarPress = () => {
+    Alert.alert('Gambar Profil', 'Pilih sumber gambar', [
+      {
+        text: 'Kamera',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestCameraPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Kebenaran diperlukan', 'Sila benarkan akses kamera.');
+            return;
+          }
+          const result = await ImagePicker.launchCameraAsync({
+            allowsEditing: true, aspect: [1, 1], quality: 0.8, base64: true,
+          });
+          if (!result.canceled && result.assets[0]) uploadAvatar(result.assets[0]);
+        },
+      },
+      {
+        text: 'Galeri',
+        onPress: async () => {
+          const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+          if (status !== 'granted') {
+            Alert.alert('Kebenaran diperlukan', 'Sila benarkan akses galeri foto.');
+            return;
+          }
+          const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ImagePicker.MediaTypeOptions.Images,
+            allowsEditing: true, aspect: [1, 1], quality: 0.8, base64: true,
+          });
+          if (!result.canceled && result.assets[0]) uploadAvatar(result.assets[0]);
+        },
+      },
+      { text: 'Batal', style: 'cancel' },
+    ]);
   };
 
   const toggleNotifications = async (val: boolean) => {
@@ -175,65 +245,76 @@ export default function ProfileScreen() {
     if (!user || exporting) return;
     setExporting(true);
     try {
-      const [{ data: pets }, { data: remindersData }, { data: expensesData }] = await Promise.all([
-        supabase.from('pets').select('name,species,breed,dob,gender,weight,health_status').eq('user_id', user.id).is('deleted_at', null),
-        supabase.from('reminders').select('title,date,time,type,repeat,is_done').eq('user_id', user.id).order('date', { ascending: false }),
-        supabase.from('expenses').select('category,amount,date,notes').eq('user_id', user.id).order('date', { ascending: false }),
-      ]);
+      const [{ data: petsWithId }, { data: remindersData }, { data: expensesData }] =
+        await Promise.all([
+          supabase
+            .from('pets')
+            .select('id,name,species,breed,dob,gender,weight,health_status')
+            .eq('user_id', user.id)
+            .is('deleted_at', null),
+          supabase
+            .from('reminders')
+            .select('title,date,time,type,repeat,is_done')
+            .eq('user_id', user.id)
+            .order('date', { ascending: false }),
+          supabase
+            .from('expenses')
+            .select('category,amount,date,notes')
+            .eq('user_id', user.id)
+            .order('date', { ascending: false }),
+        ]);
 
-      const petIds: string[] = [];
-      const { data: petsWithId } = await supabase
-        .from('pets').select('id,name,species,breed,dob,gender,weight,health_status')
-        .eq('user_id', user.id).is('deleted_at', null);
-      (petsWithId ?? []).forEach((p: any) => petIds.push(p.id));
-
+      const petIds = (petsWithId ?? []).map((p: any) => p.id);
       let healthData: any[] = [];
       if (petIds.length > 0) {
         const { data: h } = await supabase
-          .from('health_records').select('title,date,type,status,notes')
-          .in('pet_id', petIds).order('date', { ascending: false });
+          .from('health_records')
+          .select('title,date,type,status,notes')
+          .in('pet_id', petIds)
+          .order('date', { ascending: false });
         healthData = h ?? [];
       }
 
       const lines: string[] = [
         `=== EKSPORT DATA MYPETS ===`,
-        `Tarikh Eksport: ${new Date().toLocaleDateString('ms-MY', { day: '2-digit', month: 'long', year: 'numeric' })}`,
-        `Pengguna: ${displayName}`,
+        `Tarikh Eksport: ${new Date().toLocaleDateString('ms-MY', {
+          day: '2-digit',
+          month: 'long',
+          year: 'numeric',
+        })}`,
+        `Pengguna: ${profileName}`,
         '',
+        '--- HAIWAN PELIHARAAN ---',
+        'Nama,Spesies,Baka,Tarikh Lahir,Jantina,Berat (kg),Status Kesihatan',
       ];
-
-      lines.push('--- HAIWAN PELIHARAAN ---');
-      lines.push('Nama,Spesies,Baka,Tarikh Lahir,Jantina,Berat (kg),Status Kesihatan');
       (petsWithId ?? []).forEach((p: any) => {
-        lines.push([p.name, p.species, p.breed || '', p.dob || '', p.gender, p.weight || '', p.health_status].join(','));
+        lines.push(
+          [p.name, p.species, p.breed || '', p.dob || '', p.gender, p.weight || '', p.health_status].join(',')
+        );
       });
 
-      lines.push('');
-      lines.push('--- REKOD KESIHATAN ---');
-      lines.push('Tajuk,Tarikh,Jenis,Status,Nota');
+      lines.push('', '--- REKOD KESIHATAN ---', 'Tajuk,Tarikh,Jenis,Status,Nota');
       healthData.forEach((h: any) => {
-        lines.push([h.title, h.date || '', h.type || '', h.status || '', (h.notes || '').replace(/,/g, ';')].join(','));
+        lines.push(
+          [h.title, h.date || '', h.type || '', h.status || '', (h.notes || '').replace(/,/g, ';')].join(',')
+        );
       });
 
-      lines.push('');
-      lines.push('--- PERBELANJAAN ---');
-      lines.push('Kategori,Jumlah (RM),Tarikh,Nota');
+      lines.push('', '--- PERBELANJAAN ---', 'Kategori,Jumlah (RM),Tarikh,Nota');
       (expensesData ?? []).forEach((e: any) => {
-        lines.push([e.category, e.amount, e.date || '', (e.notes || '').replace(/,/g, ';')].join(','));
+        lines.push(
+          [e.category, e.amount, e.date || '', (e.notes || '').replace(/,/g, ';')].join(',')
+        );
       });
 
-      lines.push('');
-      lines.push('--- PERINGATAN ---');
-      lines.push('Tajuk,Tarikh,Masa,Jenis,Ulang,Selesai');
+      lines.push('', '--- PERINGATAN ---', 'Tajuk,Tarikh,Masa,Jenis,Ulang,Selesai');
       (remindersData ?? []).forEach((r: any) => {
-        lines.push([r.title, r.date, r.time || '', r.type, r.repeat, r.is_done ? 'Ya' : 'Tidak'].join(','));
+        lines.push(
+          [r.title, r.date, r.time || '', r.type, r.repeat, r.is_done ? 'Ya' : 'Tidak'].join(',')
+        );
       });
 
-      const csv = lines.join('\n');
-      await Share.share({
-        message: csv,
-        title: 'MyPets — Eksport Data',
-      });
+      await Share.share({ message: lines.join('\n'), title: 'MyPets — Eksport Data' });
     } catch {
       Alert.alert('Ralat', 'Gagal mengeksport data. Cuba lagi.');
     } finally {
@@ -241,35 +322,40 @@ export default function ProfileScreen() {
     }
   };
 
-  const handleLogout = () => {
-    Alert.alert('Log Keluar', 'Adakah anda pasti ingin log keluar?', [
-      { text: 'Batal', style: 'cancel' },
-      {
-        text: 'Log Keluar',
-        style: 'destructive',
-        onPress: async () => {
-          await supabase.auth.signOut();
-          router.replace('/(auth)/login');
+  const handleLogout = async () => {
+    if (Platform.OS === 'web') {
+      const confirmed = window.confirm('Adakah anda pasti ingin log keluar?');
+      if (confirmed) {
+        await logout();
+      }
+    } else {
+      Alert.alert('Log Keluar', 'Adakah anda pasti ingin log keluar?', [
+        { text: 'Batal', style: 'cancel' },
+        {
+          text: 'Log Keluar',
+          style: 'destructive',
+          onPress: async () => {
+            await logout();
+          },
         },
-      },
-    ]);
+      ]);
+    }
   };
 
   const roleBadge = role === 'Breeder' ? 'Penternak' : 'Pemilik Haiwan';
   const langLabel = i18n.language === 'bm' ? 'BM / EN' : 'EN / BM';
   const themeLabel = theme === 'light' ? 'Terang' : 'Gelap';
-  const themeIcon: React.ComponentProps<typeof Ionicons>['name'] = theme === 'light' ? 'sunny-outline' : 'moon-outline';
+  const themeIcon: React.ComponentProps<typeof Ionicons>['name'] =
+    theme === 'light' ? 'sunny-outline' : 'moon-outline';
 
   return (
     <View style={s.root}>
-      {/* ── Indigo Header ── */}
       <SafeAreaView edges={['top']} style={{ backgroundColor: PRIMARY }}>
         <View style={s.headerRow}>
           <Text style={s.headerTitle}>Tetapan</Text>
         </View>
       </SafeAreaView>
 
-      {/* ── Body ── */}
       <ScrollView
         style={s.body}
         contentContainerStyle={s.bodyContent}
@@ -277,12 +363,30 @@ export default function ProfileScreen() {
       >
         {/* User Card */}
         <View style={s.userCard}>
-          <View style={s.userAvatar}>
-            <Text style={s.userAvatarText}>
-              {loading ? '?' : getInitials(displayName || 'U')}
-            </Text>
-          </View>
-          <Text style={s.userName}>{loading ? '...' : displayName}</Text>
+          <TouchableOpacity
+            style={s.userAvatar}
+            onPress={handleAvatarPress}
+            activeOpacity={0.85}
+            disabled={uploadingAvatar}
+          >
+            {avatarUrl ? (
+              <Image source={{ uri: avatarUrl }} style={s.userAvatarImage} />
+            ) : (
+              <Text style={s.userAvatarText}>
+                {loading ? '?' : getInitials(profileName || 'U')}
+              </Text>
+            )}
+            {uploadingAvatar ? (
+              <View style={s.userAvatarOverlay}>
+                <ActivityIndicator color="#FFFFFF" size="small" />
+              </View>
+            ) : (
+              <View style={s.userAvatarBadge}>
+                <Ionicons name="camera" size={10} color="#FFFFFF" />
+              </View>
+            )}
+          </TouchableOpacity>
+          <Text style={s.userName}>{loading ? '...' : profileName}</Text>
           <View style={s.roleBadge}>
             <Text style={s.roleBadgeText}>{roleBadge}</Text>
           </View>
@@ -384,17 +488,8 @@ export default function ProfileScreen() {
 const s = StyleSheet.create({
   root: { flex: 1, backgroundColor: PRIMARY },
 
-  headerRow: {
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 56,
-  },
-  headerTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: WHITE,
-    letterSpacing: 0.3,
-  },
+  headerRow: { paddingHorizontal: 20, paddingTop: 16, paddingBottom: 56 },
+  headerTitle: { fontSize: 22, fontWeight: '700', color: WHITE, letterSpacing: 0.3 },
 
   body: {
     flex: 1,
@@ -403,12 +498,8 @@ const s = StyleSheet.create({
     borderTopRightRadius: 28,
     marginTop: -28,
   },
-  bodyContent: {
-    paddingHorizontal: 20,
-    paddingTop: 24,
-  },
+  bodyContent: { paddingHorizontal: 20, paddingTop: 24 },
 
-  // User Card
   userCard: {
     backgroundColor: PRIMARY,
     borderRadius: 20,
@@ -424,18 +515,39 @@ const s = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 12,
+    overflow: 'visible',
+    position: 'relative',
   },
-  userAvatarText: {
-    fontSize: 26,
-    fontWeight: '800',
-    color: PRIMARY,
+  userAvatarImage: {
+    width: 72,
+    height: 72,
+    borderRadius: 36,
+    borderWidth: 2,
+    borderColor: ACCENT,
   },
-  userName: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: WHITE,
-    marginBottom: 6,
+  userAvatarText: { fontSize: 26, fontWeight: '800', color: PRIMARY },
+  userAvatarOverlay: {
+    position: 'absolute',
+    top: 0, left: 0, right: 0, bottom: 0,
+    borderRadius: 36,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
+  userAvatarBadge: {
+    position: 'absolute',
+    bottom: 0,
+    right: -2,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: PRIMARY,
+    borderWidth: 2,
+    borderColor: WHITE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  userName: { fontSize: 18, fontWeight: '700', color: WHITE, marginBottom: 6 },
   roleBadge: {
     backgroundColor: 'rgba(255,255,255,0.2)',
     borderRadius: 16,
@@ -443,16 +555,8 @@ const s = StyleSheet.create({
     paddingVertical: 4,
     marginBottom: 6,
   },
-  roleBadgeText: {
-    color: ACCENT,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  userLocation: {
-    color: '#AABAD4',
-    fontSize: 13,
-    marginBottom: 12,
-  },
+  roleBadgeText: { color: ACCENT, fontSize: 12, fontWeight: '700' },
+  userLocation: { color: '#AABAD4', fontSize: 13, marginBottom: 12 },
   editProfileBtn: {
     backgroundColor: 'rgba(255,255,255,0.15)',
     borderRadius: 10,
@@ -460,13 +564,8 @@ const s = StyleSheet.create({
     paddingVertical: 8,
     marginTop: 6,
   },
-  editProfileBtnText: {
-    color: WHITE,
-    fontSize: 14,
-    fontWeight: '600',
-  },
+  editProfileBtnText: { color: WHITE, fontSize: 14, fontWeight: '600' },
 
-  // Groups
   group: { marginBottom: 20 },
   groupTitle: {
     fontSize: 11,
@@ -487,7 +586,6 @@ const s = StyleSheet.create({
     elevation: 2,
   },
 
-  // Row
   row: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -502,36 +600,16 @@ const s = StyleSheet.create({
     justifyContent: 'center',
     marginRight: 14,
   },
-  rowLabel: {
-    flex: 1,
-    fontSize: 14,
-    fontWeight: '500',
-    color: INK,
-  },
-  rowRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  rowValue: {
-    fontSize: 13,
-    color: MUTED,
-    marginRight: 4,
-  },
-  divider: {
-    height: 1,
-    backgroundColor: '#F0EDE6',
-    marginLeft: 64,
-  },
+  rowLabel: { flex: 1, fontSize: 14, fontWeight: '500', color: INK },
+  rowRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  rowValue: { fontSize: 13, color: MUTED, marginRight: 4 },
+  divider: { height: 1, backgroundColor: '#F0EDE6', marginLeft: 64 },
+
   sageBadge: {
     backgroundColor: '#E8F5E9',
     borderRadius: 8,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },
-  sageBadgeText: {
-    color: '#2E7D32',
-    fontSize: 12,
-    fontWeight: '700',
-  },
+  sageBadgeText: { color: '#2E7D32', fontSize: 12, fontWeight: '700' },
 });
